@@ -88,8 +88,6 @@ def jacobian(state):
                      [y, x, -B]])
  
 def tangent_data(initial_x, initial_y, initial_z, steps=TIMESTEPS):
-    """Integrate the state and the tangent-linear propagator M = dp(t)/dp(0)
-    together. Returns the spectral norm of M at every step."""
     state = np.array([float(initial_x), float(initial_y), float(initial_z)])
     M = np.eye(3)
  
@@ -140,8 +138,6 @@ def tensor_data(initial_x, initial_y, initial_z, control, steps=TIMESTEPS):
     return torch.stack(points)
  
 def gradient_growth(initial_x, initial_y, initial_z, horizons, u0=0.0, coord=0):
-    """|dx(T)/du| at each horizon in `horizons` (Lyapunov times), from one
-    rollout: forward once, then one backward pass per horizon."""
     ut = torch.tensor(float(u0), dtype=torch.float64, requires_grad=True)
     traj = tensor_data(initial_x, initial_y, initial_z, ut,
                        steps=horizon_steps(max(horizons)))
@@ -167,9 +163,6 @@ def gradient_segments(horizons, segments=20, spacing=500):
     return grads
  
 def log_mean(values, axis=0):
-    """Geometric mean. Growth here is multiplicative, so averaging the logs is
-    the estimator that converges; an arithmetic mean is dominated by whichever
-    segment happened to sit in the fastest-expanding region."""
     return np.exp(np.log(values).mean(axis=axis))
  
  
