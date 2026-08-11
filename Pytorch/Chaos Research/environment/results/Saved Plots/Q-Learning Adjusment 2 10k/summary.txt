@@ -1,0 +1,59 @@
+Q-LEARNING CONTROL OF LORENZ SYSTEM
+============================================================
+
+CONTROL OBJECTIVE:
+  Minimize velocity (damping)
+
+TRAINING CONFIGURATION:
+  Episodes:         1000
+  Train steps/ep:   1000
+  Eval steps/ep:    10000
+  Learning rate:    0.1
+  Discount (γ):     0.99
+  Epsilon schedule: 1.0 → 0.01 (decay: 0.9975)
+
+DISCRETIZATION:
+  State space: 25×25×25 = 15625 bins
+  Action space: 11 discrete actions
+
+CONTROL OBJECTIVE:
+  Type:           damping
+  Description:    Minimize velocity (damping)
+
+REWARD FUNCTION WEIGHTS:
+  Velocity weight: 5.0 (for damping)
+  Goal weight:     5.0 (for equilibrium)
+  Control weight:  0.01 (control energy penalty - REDUCED)
+
+RESULTS (Mean ± Std over 10 eval episodes):
+
+Learned Policy (with control):
+  Total Reward:      -1321185.49 ± 3474.75
+  Mean Reward/Step:  -132.1053 ± 0.3474
+
+Uncontrolled Policy (u=0):
+  Total Reward:      -1326192.07 ± 4739.79
+  Mean Reward/Step:  -132.6059 ± 0.4739
+
+COMPARISON:
+  Improvement (Total):            5006.58
+  Improvement (Mean/Step):         0.5006
+  Beats Baseline (Mean/Step):    YES ✓
+
+OUTPUT FILES:
+  - qlearning_results_20260811_022954/
+    ├── training_curves.png         (training metrics over episodes)
+    ├── trajectory_components.png   (learned vs uncontrolled states)
+    ├── phase_space_3d.png          (3D Lorenz attractor comparison)
+    ├── control_input.png           (control signals used)
+    ├── reward_comparison.png       (evaluation reward comparison)
+    ├── qtable.npz                  (learned Q-table)
+    ├── metrics.npz                 (all numerical results)
+    ├── config.json                 (experiment configuration)
+    └── summary.txt                 (this file)
+
+INTERPRETATION:
+  The mean reward per time step is the key metric because it accounts for
+  different trajectory lengths. A positive improvement indicates the learned
+  controller successfully reduces the distance to the control goal while
+  managing control energy.

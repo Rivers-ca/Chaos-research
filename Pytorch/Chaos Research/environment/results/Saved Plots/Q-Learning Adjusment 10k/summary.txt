@@ -1,0 +1,54 @@
+Q-LEARNING CONTROL OF LORENZ SYSTEM
+============================================================
+
+CONTROL OBJECTIVE:
+  Stabilize Lorenz at negative equilibrium (-8.49, -8.49, 27)
+
+TRAINING CONFIGURATION:
+  Episodes:         500
+  Train steps/ep:   1000
+  Eval steps/ep:    10000
+  Learning rate:    0.1
+  Discount (γ):     0.99
+  Epsilon schedule: 1.0 → 0.01 (decay: 0.9975)
+
+DISCRETIZATION:
+  State space: 15×15×15 = 3375 bins
+  Action space: 11 discrete actions
+
+REWARD FUNCTION:
+  Goal weight:    1.0 (distance to target)
+  Control weight: 0.5 (control energy penalty)
+
+RESULTS (Mean ± Std over 10 eval episodes):
+
+Learned Policy (with control):
+  Total Reward:      -165509.11 ± 7414.36
+  Mean Reward/Step:  -16.5493 ± 0.7414
+
+Uncontrolled Policy (u=0):
+  Total Reward:      -163410.05 ± 8463.69
+  Mean Reward/Step:  -16.3394 ± 0.8463
+
+COMPARISON:
+  Improvement (Total):           -2099.06
+  Improvement (Mean/Step):        -0.2099
+  Beats Baseline (Mean/Step):    NO ✗
+
+OUTPUT FILES:
+  - qlearning_results_20260811_021701/
+    ├── training_curves.png         (training metrics over episodes)
+    ├── trajectory_components.png   (learned vs uncontrolled states)
+    ├── phase_space_3d.png          (3D Lorenz attractor comparison)
+    ├── control_input.png           (control signals used)
+    ├── reward_comparison.png       (evaluation reward comparison)
+    ├── qtable.npz                  (learned Q-table)
+    ├── metrics.npz                 (all numerical results)
+    ├── config.json                 (experiment configuration)
+    └── summary.txt                 (this file)
+
+INTERPRETATION:
+  The mean reward per time step is the key metric because it accounts for
+  different trajectory lengths. A positive improvement indicates the learned
+  controller successfully reduces the distance to the control goal while
+  managing control energy.
