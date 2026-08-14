@@ -80,7 +80,7 @@ class ExperimentDefaults:
     learning_rate: float = 0.01
     discount_factor: float = 1.0
     epsilon: float = 1.0
-    epsilon_decay: float = 0.50
+    epsilon_decay: float = 0.05
     epsilon_min: float = 0.05
 
     # Initial-condition perturbation
@@ -303,7 +303,7 @@ class LorenzEnvEuler:
         if self.regularized:
             control_cost = self.alpha * (u / self.u_ref) ** 2 / self.horizon
         reward = -float(state_cost + control_cost)
-
+        #Here is the PHI REWARD FUNCITON
         done = diverged
         info: Dict[str, bool] = {}
         if diverged:
