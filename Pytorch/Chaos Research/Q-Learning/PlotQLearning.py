@@ -71,6 +71,28 @@ def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
     )
 
 
+def evaluate_uncontrolled_lorenz(
+    env: Any,
+    initial_state: Sequence[float],
+    max_steps: int | None = None,
+) -> np.ndarray:
+    """Evaluate the imported Lorenz environment with zero control."""
+    if env.action_type != "continuous":
+        raise ValueError("The uncontrolled baseline requires a continuous-action env")
+    if not env.action_low <= 0.0 <= env.action_high:
+        raise ValueError("The uncontrolled baseline environment must permit u=0")
+
+    state = env.reset(x0=np.asarray(initial_state, dtype=np.float64))
+    trajectory = [state.copy()]
+    done = False
+    steps = 0
+    while not done and (max_steps is None or steps < max_steps):
+        state, _, done, _ = env.step(0.0)
+        trajectory.append(state.copy())
+        steps += 1
+    return np.asarray(trajectory, dtype=np.float64)
+
+
 def _finish_figure(
     figure: Figure,
     output_path: Path | None,
@@ -186,6 +208,41 @@ def plot_training_diagnostics(
     distribution_axis.grid(axis="y", alpha=0.25)
     distribution_axis.legend()
 
+    _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
+def plot_uncontrolled_lorenz(
+    trajectory: np.ndarray,
+    output_path: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Plot a zero-control trajectory produced by ``LorenzEnvEuler``."""
+    points = np.asarray(trajectory, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] < 2:
+        raise ValueError("Uncontrolled trajectory must have shape (n, 3), n >= 2")
+
+    duration = steps_to_lyapunov_times(points.shape[0] - 1)
+    figure = plt.figure(figsize=(10, 8))
+    axis = figure.add_subplot(111, projection="3d")
+    axis.plot(
+        points[:, 0],
+        points[:, 1],
+        points[:, 2],
+        color="tab:blue",
+        linewidth=0.5,
+        alpha=0.85,
+    )
+    axis.scatter(*points[0], color="tab:green", s=35, label="Start", depthshade=False)
+    axis.scatter(*points[-1], color="tab:red", s=35, label="End", depthshade=False)
+    axis.set_xlabel("X Axis")
+    axis.set_ylabel("Y Axis")
+    axis.set_zlabel("Z Axis")
+    axis.set_title(
+        f"Uncontrolled Lorenz trajectory (u = 0, {duration:.1f} Lyapunov times)"
+    )
+    axis.legend()
     _finish_figure(figure, output_path, show=show, dpi=dpi)
 
 
@@ -772,10 +829,37 @@ def main() -> None:
     if not np.array_equal(table_before_evaluation, agent.q_table):
         raise RuntimeError("Greedy evaluation unexpectedly changed the Q-table")
 
+    controlled_trajectories = evaluation["trajectories"]
+    if len(controlled_trajectories) == 0:
+        raise RuntimeError("Evaluation returned no trajectory for baseline comparison")
+    baseline_initial_state = np.asarray(
+        controlled_trajectories[0][0],
+        dtype=np.float64,
+    )
+    uncontrolled_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.eval_lyapunov_times,
+        action_type="continuous",
+        action_bounds=(-qlearning.U_REF, qlearning.U_REF),
+        regularized=False,
+        u_ref=qlearning.U_REF,
+    )
+    uncontrolled_trajectory = evaluate_uncontrolled_lorenz(
+        uncontrolled_env,
+        baseline_initial_state.tolist(),
+        args.eval_max_steps,
+    )
+
     output_dir = None if args.no_save else args.output_dir.expanduser().resolve()
     plot_training_diagnostics(
         history,
         None if output_dir is None else output_dir / "training_diagnostics.png",
+        show=args.show,
+        dpi=args.dpi,
+    )
+    plot_uncontrolled_lorenz(
+        uncontrolled_trajectory,
+        None if output_dir is None else output_dir / "evaluation_uncontrolled_lorenz.png",
         show=args.show,
         dpi=args.dpi,
     )

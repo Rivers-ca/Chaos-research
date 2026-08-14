@@ -60,11 +60,11 @@ class ExperimentDefaults:
     eval_max_steps: Optional[int] = None
 
     # Reproducibility
-    seed: int = 7
+    seed: int = 2
 
     # Simulation duration
     training_lyapunov_times: float = 2.0
-    evaluation_lyapunov_times: float = 50.0
+    evaluation_lyapunov_times: float = 20.0
 
     # Control settings
     control_cost: float = LAMBDA
@@ -79,7 +79,7 @@ class ExperimentDefaults:
     # Q-learning hyperparameters
     learning_rate: float = 0.01
     discount_factor: float = 1.0
-    epsilon: float = 1.0
+    epsilon: float = 0.99
     epsilon_decay: float = 0.05
     epsilon_min: float = 0.05
 
