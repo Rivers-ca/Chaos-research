@@ -32,3 +32,6 @@ events.out.tfevents.*
 .DS_Store
 .vscode/
 .idea/
+
+# Keep local research papers out of GitHub
+/Relevant Papers*/
