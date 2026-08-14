@@ -241,7 +241,8 @@ def plot_evaluation_diagnostics(
     rounded_time_end = float(np.rint(state_times[-1]))
     display_time_end = (
         rounded_time_end
-        if np.isclose(state_times[-1], rounded_time_end, atol=0.02)
+        if rounded_time_end >= 1.0
+        and np.isclose(state_times[-1], rounded_time_end, atol=0.02)
         else float(state_times[-1])
     )
 
@@ -474,44 +475,64 @@ def _parse_state_bins(values: Sequence[int]) -> int | tuple[int, int, int]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    defaults = qlearning.EXPERIMENT_DEFAULTS
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--episodes", type=int, default=500)
-    parser.add_argument("--eval-episodes", type=int, default=5)
+    parser.add_argument("--episodes", type=int, default=defaults.episodes)
+    parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=None,
+        default=defaults.max_steps,
         help="Optional training-step cap per episode",
     )
     parser.add_argument(
         "--eval-max-steps",
         type=int,
-        default=None,
+        default=defaults.eval_max_steps,
         help="Optional evaluation-step cap; defaults to the full evaluation horizon",
     )
-    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--seed", type=int, default=defaults.seed)
     parser.add_argument(
         "--lyapunov-times",
         type=float,
-        default=2.0,
+        default=defaults.training_lyapunov_times,
         help="Training episode length in Lyapunov times",
     )
     parser.add_argument(
         "--eval-lyapunov-times",
         type=float,
-        default=50.0,
+        default=defaults.evaluation_lyapunov_times,
         help="Evaluation episode length in Lyapunov times",
     )
-    parser.add_argument("--control-cost", type=float, default=qlearning.LAMBDA)
-    parser.add_argument("--action-low", type=float, default=-qlearning.U_REF)
-    parser.add_argument("--action-high", type=float, default=qlearning.U_REF)
-    parser.add_argument("--action-bins", type=int, default=9)
-    parser.add_argument("--state-bins", type=int, nargs="+", default=[15, 15, 15])
-    parser.add_argument("--learning-rate", type=float, default=0.15)
-    parser.add_argument("--discount-factor", type=float, default=0.99)
-    parser.add_argument("--epsilon", type=float, default=1.0)
-    parser.add_argument("--epsilon-decay", type=float, default=0.99)
-    parser.add_argument("--epsilon-min", type=float, default=0.05)
+    parser.add_argument("--control-cost", type=float, default=defaults.control_cost)
+    parser.add_argument(
+        "--regularized",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.regularized,
+        help="include normalized control effort in the objective",
+    )
+    parser.add_argument("--action-low", type=float, default=defaults.action_low)
+    parser.add_argument("--action-high", type=float, default=defaults.action_high)
+    parser.add_argument("--action-bins", type=int, default=defaults.action_bins)
+    parser.add_argument(
+        "--state-bins",
+        type=int,
+        nargs="+",
+        default=list(defaults.state_bins),
+    )
+    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
+    parser.add_argument(
+        "--discount-factor", type=float, default=defaults.discount_factor
+    )
+    parser.add_argument("--epsilon", type=float, default=defaults.epsilon)
+    parser.add_argument("--epsilon-decay", type=float, default=defaults.epsilon_decay)
+    parser.add_argument("--epsilon-min", type=float, default=defaults.epsilon_min)
+    parser.add_argument(
+        "--initial-state-noise",
+        type=float,
+        default=defaults.initial_state_noise,
+        help="standard deviation of the seeded initial-state perturbation",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -566,12 +587,18 @@ def main() -> None:
         parser.error("require 0 <= --epsilon-min <= --epsilon <= 1")
     if not 0.0 < args.epsilon_decay <= 1.0:
         parser.error("--epsilon-decay must be in (0, 1]")
+    if not np.isfinite(args.initial_state_noise) or args.initial_state_noise < 0.0:
+        parser.error("--initial-state-noise must be finite and nonnegative")
 
     reference_state = np.asarray(qlearning.INITIAL_STATE, dtype=np.float64).copy()
     initial_state_rng = np.random.default_rng(args.seed)
 
     def seeded_initial_state() -> np.ndarray:
-        return reference_state + initial_state_rng.normal(0.0, 0.1, size=3)
+        return reference_state + initial_state_rng.normal(
+            0.0,
+            args.initial_state_noise,
+            size=3,
+        )
 
     training_env = LorenzEnvEuler(
         alpha=args.control_cost,
@@ -580,7 +607,7 @@ def main() -> None:
         action_bounds=(args.action_low, args.action_high),
         n_action_bins=args.action_bins,
         ic_dist=seeded_initial_state,
-        regularized=True,
+        regularized=args.regularized,
         u_ref=qlearning.U_REF,
     )
     agent = QLearningAgent(
@@ -607,7 +634,7 @@ def main() -> None:
         action_bounds=(args.action_low, args.action_high),
         n_action_bins=args.action_bins,
         ic_dist=seeded_initial_state,
-        regularized=True,
+        regularized=args.regularized,
         u_ref=qlearning.U_REF,
     )
     table_before_evaluation = agent.q_table.copy()
