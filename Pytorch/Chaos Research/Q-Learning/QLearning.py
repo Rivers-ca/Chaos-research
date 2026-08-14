@@ -696,7 +696,7 @@ def main() -> None:
         # An undiscounted return matches the trajectory-mean reference loss.
         discount_factor=1.0,
         epsilon=1.0,
-        epsilon_decay=0.99,
+        epsilon_decay=0.50,
         epsilon_min=0.05,
         state_bins=(15, 15, 15),
         random_seed=args.seed,
