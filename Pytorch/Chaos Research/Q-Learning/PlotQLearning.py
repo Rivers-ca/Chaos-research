@@ -77,9 +77,11 @@ def _finish_figure(
     *,
     show: bool,
     dpi: int,
+    tight_layout: bool = True,
 ) -> None:
     """Save and/or display a completed Matplotlib figure."""
-    figure.tight_layout()
+    if tight_layout:
+        figure.tight_layout()
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
@@ -226,36 +228,112 @@ def plot_evaluation_diagnostics(
         ):
             raise ValueError("Each evaluation trajectory must have shape (n, 3)")
 
-    first_trajectory = trajectory_arrays[0]
-    first_controls = np.asarray(controls[0], dtype=np.float64)
-    if first_controls.ndim != 1:
-        raise ValueError("Each evaluation control sequence must be one-dimensional")
-    expected_controls = first_trajectory.shape[0] - 1
-    if first_controls.size != expected_controls:
-        raise ValueError(
-            "The first control sequence must contain one value per transition; "
-            f"expected {expected_controls}, received {first_controls.size}"
-        )
-    state_times = _lyapunov_time_axis(first_trajectory.shape[0])
-    control_times = state_times[:-1]
-    rounded_time_end = float(np.rint(state_times[-1]))
+    control_arrays = [np.asarray(values, dtype=np.float64) for values in controls]
+    for trial, (trajectory, control_values) in enumerate(
+        zip(trajectory_arrays, control_arrays), start=1
+    ):
+        if control_values.ndim != 1:
+            raise ValueError(
+                "Each evaluation control sequence must be one-dimensional"
+            )
+        expected_controls = trajectory.shape[0] - 1
+        if control_values.size != expected_controls:
+            raise ValueError(
+                f"Evaluation trial {trial} must contain one control value "
+                f"per transition; expected {expected_controls}, received "
+                f"{control_values.size}"
+            )
+
+    state_time_axes = [
+        _lyapunov_time_axis(trajectory.shape[0]) for trajectory in trajectory_arrays
+    ]
+    control_time_axes = [times[:-1] for times in state_time_axes]
+    actual_time_end = max(float(times[-1]) for times in state_time_axes)
+    rounded_time_end = float(np.rint(actual_time_end))
     display_time_end = (
         rounded_time_end
         if rounded_time_end >= 1.0
-        and np.isclose(state_times[-1], rounded_time_end, atol=0.02)
-        else float(state_times[-1])
+        and np.isclose(actual_time_end, rounded_time_end, atol=0.02)
+        else actual_time_end
     )
 
     def output_path(filename: str) -> Path | None:
         return None if output_dir is None else output_dir / filename
+
+    representative_trajectory = trajectory_arrays[0]
+    representative_controls = control_arrays[0]
+    representative_times = state_time_axes[0]
+    representative_control_times = control_time_axes[0]
+
+    corrected_figure, (corrected_state_axis, corrected_control_axis) = plt.subplots(
+        2,
+        1,
+        figsize=(14, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": (1.15, 1.0), "hspace": 0.14},
+    )
+    corrected_figure.suptitle(
+        "Closed-loop Lorenz trajectory with greedy Q-learning correction",
+        fontsize=15,
+    )
+    for coordinate, label in enumerate(("x", "y", "z")):
+        corrected_state_axis.plot(
+            representative_times,
+            representative_trajectory[:, coordinate],
+            linewidth=0.8,
+            label=label,
+        )
+    corrected_state_axis.axhline(
+        0.0,
+        color="black",
+        linestyle="--",
+        linewidth=1.0,
+    )
+    corrected_state_axis.set_ylabel("State")
+    corrected_state_axis.set_title("Controlled Lorenz state")
+    corrected_state_axis.grid(alpha=0.25)
+    corrected_state_axis.legend(loc="upper right", ncol=3)
+
+    corrected_control_axis.step(
+        representative_control_times,
+        representative_controls,
+        where="post",
+        color="crimson",
+        linewidth=0.75,
+    )
+    corrected_control_axis.axhline(
+        0.0,
+        color="black",
+        linestyle="--",
+        linewidth=1.0,
+    )
+    corrected_control_axis.set_xlim(0.0, display_time_end)
+    corrected_control_axis.set_xlabel("Lyapunov times (t / τ)")
+    corrected_control_axis.set_ylabel("Control correction u")
+    corrected_control_axis.set_title("Correction applied to the x dynamics")
+    corrected_control_axis.grid(alpha=0.25)
+    corrected_figure.subplots_adjust(
+        left=0.07,
+        right=0.98,
+        bottom=0.08,
+        top=0.91,
+        hspace=0.20,
+    )
+    _finish_figure(
+        corrected_figure,
+        output_path("evaluation_corrected_trajectory.png"),
+        show=show,
+        dpi=dpi,
+        tight_layout=False,
+    )
 
     trajectory_figure = plt.figure(figsize=(9, 7))
     trajectory_axis = trajectory_figure.add_subplot(111, projection="3d")
     trajectory_colors = plt.cm.viridis(
         np.linspace(0.08, 0.92, len(trajectory_arrays))
     )
-    label_episodes = len(trajectory_arrays) <= 10
-    for episode, (trajectory, color) in enumerate(
+    label_trials = len(trajectory_arrays) <= 10
+    for trial, (trajectory, color) in enumerate(
         zip(trajectory_arrays, trajectory_colors), start=1
     ):
         trajectory_axis.plot(
@@ -265,14 +343,14 @@ def plot_evaluation_diagnostics(
             color=color,
             linewidth=0.65,
             alpha=0.85,
-            label=f"Episode {episode}" if label_episodes else None,
+            label=f"Trial {trial}" if label_trials else None,
         )
     trajectory_axis.set_xlabel("x")
     trajectory_axis.set_ylabel("y")
     trajectory_axis.set_zlabel("z")
-    trajectory_axis.set_title("All evaluation trajectories")
-    if label_episodes:
-        trajectory_axis.legend()
+    trajectory_axis.set_title("Evaluation trajectories across initial-condition trials")
+    if label_trials:
+        trajectory_axis.legend(title="Evaluation trial")
     _finish_figure(
         trajectory_figure,
         output_path("evaluation_trajectory.png"),
@@ -280,12 +358,17 @@ def plot_evaluation_diagnostics(
         dpi=dpi,
     )
 
-    attractor_segments = np.stack(
-        (first_trajectory[:-1], first_trajectory[1:]),
-        axis=1,
+    attractor_segments = np.concatenate(
+        [
+            np.stack((trajectory[:-1], trajectory[1:]), axis=1)
+            for trajectory in trajectory_arrays
+        ],
+        axis=0,
     )
-    control_min = float(np.min(first_controls))
-    control_max = float(np.max(first_controls))
+    all_control_values = np.concatenate(control_arrays)
+    all_trajectory_points = np.concatenate(trajectory_arrays, axis=0)
+    control_min = float(np.min(all_control_values))
+    control_max = float(np.max(all_control_values))
     if np.isclose(control_min, control_max):
         color_padding = max(1.0, abs(control_min) * 0.05)
         control_min -= color_padding
@@ -301,17 +384,20 @@ def plot_evaluation_diagnostics(
         linewidth=0.7,
         alpha=0.9,
     )
-    colored_trajectory.set_array(first_controls)
+    colored_trajectory.set_array(all_control_values)
     attractor_axis.add_collection3d(colored_trajectory)
     attractor_axis.auto_scale_xyz(
-        first_trajectory[:, 0],
-        first_trajectory[:, 1],
-        first_trajectory[:, 2],
+        all_trajectory_points[:, 0],
+        all_trajectory_points[:, 1],
+        all_trajectory_points[:, 2],
     )
     attractor_axis.set_xlabel("X Axis")
     attractor_axis.set_ylabel("Y Axis")
     attractor_axis.set_zlabel("Z Axis")
-    attractor_axis.set_title("Controlled trajectory (regularized tabular Q-learning)")
+    attractor_axis.set_title(
+        "Control-colored trajectories across evaluation trials "
+        "(regularized tabular Q-learning)"
+    )
     attractor_figure.colorbar(
         colored_trajectory,
         ax=attractor_axis,
@@ -326,21 +412,42 @@ def plot_evaluation_diagnostics(
         dpi=dpi,
     )
 
-    state_figure, state_axis = plt.subplots(figsize=(14, 5))
-    for index, label in enumerate(("x", "y", "z")):
-        state_axis.plot(
-            state_times,
-            first_trajectory[:, index],
-            linewidth=0.8,
-            label=label,
+    state_figure, state_axes = plt.subplots(
+        3,
+        1,
+        figsize=(14, 10),
+        sharex=True,
+    )
+    state_figure.suptitle(
+        "State response across evaluation trials\n"
+        "Same greedy Q-table; each color starts from a separately perturbed "
+        "initial state"
+    )
+    for coordinate, (state_axis, coordinate_label) in enumerate(
+        zip(state_axes, ("x", "y", "z"))
+    ):
+        for trial, (trajectory, times, color) in enumerate(
+            zip(trajectory_arrays, state_time_axes, trajectory_colors), start=1
+        ):
+            state_axis.plot(
+                times,
+                trajectory[:, coordinate],
+                color=color,
+                linewidth=0.55,
+                alpha=0.62,
+                label=f"Trial {trial}" if label_trials else None,
+            )
+        state_axis.axhline(0.0, color="black", linestyle="--", linewidth=0.8)
+        state_axis.set_xlim(0.0, display_time_end)
+        state_axis.set_ylabel(coordinate_label)
+        state_axis.grid(alpha=0.25)
+    state_axes[-1].set_xlabel("Lyapunov times (t / τ)")
+    if label_trials:
+        state_axes[0].legend(
+            loc="upper right",
+            ncol=len(trajectory_arrays),
+            title="Initial-condition trial",
         )
-    state_axis.axhline(0.0, color="black", linestyle="--", linewidth=1.0)
-    state_axis.set_xlim(0.0, display_time_end)
-    state_axis.set_xlabel("Lyapunov times (t / τ)")
-    state_axis.set_ylabel("State")
-    state_axis.set_title("Controlled Lorenz trajectory: first evaluation episode")
-    state_axis.grid(alpha=0.25)
-    state_axis.legend(loc="upper right", ncol=3)
     _finish_figure(
         state_figure,
         output_path("evaluation_state_coordinates.png"),
@@ -349,12 +456,29 @@ def plot_evaluation_diagnostics(
     )
 
     control_figure, control_axis = plt.subplots(figsize=(14, 4))
-    control_axis.step(control_times, first_controls, where="post", color="tab:orange")
+    for trial, (control_times, control_values, color) in enumerate(
+        zip(control_time_axes, control_arrays, trajectory_colors), start=1
+    ):
+        control_axis.step(
+            control_times,
+            control_values,
+            where="post",
+            color=color,
+            linewidth=0.75,
+            alpha=0.75,
+            label=f"Trial {trial}" if label_trials else None,
+        )
     control_axis.set_xlim(0.0, display_time_end)
     control_axis.set_xlabel("Lyapunov times (t / τ)")
     control_axis.set_ylabel("Control u")
-    control_axis.set_title("First evaluation episode: greedy control signal")
+    control_axis.set_title("Greedy control signals across evaluation trials")
     control_axis.grid(alpha=0.25)
+    if label_trials:
+        control_axis.legend(
+            loc="upper right",
+            ncol=len(control_arrays),
+            title="Evaluation trial",
+        )
     _finish_figure(
         control_figure,
         output_path("evaluation_control_signal.png"),
@@ -367,7 +491,7 @@ def plot_evaluation_diagnostics(
     colors = np.where(diverged, "tab:red", "tab:purple")
     reward_axis.bar(episode_numbers, rewards, color=colors, alpha=0.82)
     reward_axis.axhline(float(np.mean(rewards)), color="black", linestyle="--", linewidth=1)
-    reward_axis.set_xlabel("Evaluation episode")
+    reward_axis.set_xlabel("Evaluation trial")
     reward_axis.set_ylabel("Total reward")
     reward_axis.set_xticks(episode_numbers)
     reward_axis.set_title(f"Evaluation rewards (mean {np.mean(rewards):.2f})")
