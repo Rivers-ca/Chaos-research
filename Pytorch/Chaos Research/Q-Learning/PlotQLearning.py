@@ -1,0 +1,660 @@
+"""Train, evaluate, and plot diagnostics for the tabular Lorenz controller.
+
+This module is deliberately only an orchestration, evaluation, and visualization
+layer.  The environment, dynamics, reward, discretization, action selection, and
+Q-learning update all come from ``QLearning.py`` through a dynamic import.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import os
+import sys
+from pathlib import Path
+from types import ModuleType
+from typing import Any, Mapping, Sequence
+
+import matplotlib
+
+# Saving plots is the default workflow.  On headless macOS/Python setups the
+# implicit GUI backend can abort the process before Python can report an error.
+# Keep an explicitly requested backend or the interactive ``--show`` behavior.
+if "MPLBACKEND" not in os.environ and "--show" not in sys.argv:
+    matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import Normalize
+from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
+
+
+QLEARNING_PATH = Path(__file__).resolve().with_name("QLearning.py")
+
+
+def _load_qlearning(path: str | Path = QLEARNING_PATH) -> ModuleType:
+    """Load the implementation module from its non-package directory."""
+    source_path = Path(path)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Q-learning implementation not found: {source_path}")
+
+    module_name = "_lorenz_qlearning_implementation"
+    spec = importlib.util.spec_from_file_location(module_name, source_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not create an import spec for {source_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+# These aliases are intentionally imported from QLearning.py.  Keeping them at
+# module scope makes the dependency explicit and avoids shadow implementations.
+qlearning = _load_qlearning()
+LorenzEnvEuler = qlearning.LorenzEnvEuler
+QLearningAgent = qlearning.QLearningAgent
+train_q_learning = qlearning.train_q_learning
+evaluate_q_learning = qlearning.evaluate_q_learning
+steps_to_lyapunov_times = qlearning.steps_to_lyapunov_times
+
+
+def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
+    """Return plotting coordinates using QLearning.py's time conversion."""
+    return np.asarray(
+        [steps_to_lyapunov_times(step) for step in range(number_of_steps)],
+        dtype=np.float64,
+    )
+
+
+def _finish_figure(
+    figure: Figure,
+    output_path: Path | None,
+    *,
+    show: bool,
+    dpi: int,
+) -> None:
+    """Save and/or display a completed Matplotlib figure."""
+    figure.tight_layout()
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        print(f"Saved {output_path}")
+    if show:
+        figure.show()
+    else:
+        plt.close(figure)
+
+
+def plot_training_diagnostics(
+    history: Mapping[str, Sequence[Any]],
+    output_path: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Plot learning progress returned by ``train_q_learning``."""
+    rewards = np.asarray(history["episode_rewards"], dtype=np.float64)
+    rolling_rewards = np.asarray(history["rolling_mean_rewards"], dtype=np.float64)
+    lengths = np.asarray(history["episode_lengths"], dtype=np.int64)
+    epsilons = np.asarray(history["epsilons"], dtype=np.float64)
+    diverged = np.asarray(history["diverged"], dtype=bool)
+    episode_count = rewards.size
+    if rewards.ndim != 1 or episode_count == 0:
+        raise ValueError("Training history must contain at least one episode")
+    for name, values in (
+        ("rolling_mean_rewards", rolling_rewards),
+        ("episode_lengths", lengths),
+        ("epsilons", epsilons),
+        ("diverged", diverged),
+    ):
+        if values.shape != rewards.shape:
+            raise ValueError(
+                f"history[{name!r}] must contain {episode_count} values; "
+                f"received shape {values.shape}"
+            )
+    episodes = np.arange(1, rewards.size + 1)
+
+    figure, axes = plt.subplots(2, 2, figsize=(13, 8))
+    figure.suptitle("Tabular Q-learning training diagnostics", fontsize=15)
+
+    reward_axis = axes[0, 0]
+    reward_axis.plot(episodes, rewards, color="tab:blue", alpha=0.28, label="Episode")
+    reward_axis.plot(
+        episodes,
+        rolling_rewards,
+        color="navy",
+        linewidth=2.0,
+        label="Rolling mean from QLearning.py",
+    )
+    reward_axis.set_xlabel("Episode")
+    reward_axis.set_ylabel("Total reward")
+    reward_axis.set_title("Reward history")
+    reward_axis.grid(alpha=0.25)
+    reward_axis.legend()
+
+    epsilon_axis = axes[0, 1]
+    epsilon_axis.plot(episodes, epsilons, color="tab:orange", linewidth=2.0)
+    epsilon_axis.set_xlabel("Episode")
+    epsilon_axis.set_ylabel("Epsilon")
+    epsilon_axis.set_title("Exploration schedule")
+    epsilon_axis.grid(alpha=0.25)
+
+    length_axis = axes[1, 0]
+    length_axis.plot(episodes, lengths, color="tab:green", linewidth=1.3)
+    if np.any(diverged):
+        length_axis.scatter(
+            episodes[diverged],
+            lengths[diverged],
+            color="tab:red",
+            marker="x",
+            s=45,
+            label="Diverged",
+            zorder=3,
+        )
+        length_axis.legend()
+    length_axis.set_xlabel("Episode")
+    length_axis.set_ylabel("Steps")
+    length_axis.set_title("Episode length")
+    length_axis.grid(alpha=0.25)
+
+    distribution_axis = axes[1, 1]
+    bin_count = min(40, max(5, int(np.sqrt(rewards.size))))
+    distribution_axis.hist(
+        rewards,
+        bins=bin_count,
+        color="tab:purple",
+        alpha=0.78,
+        edgecolor="white",
+    )
+    distribution_axis.axvline(
+        float(np.mean(rewards)),
+        color="black",
+        linestyle="--",
+        linewidth=1.3,
+        label=f"Mean: {np.mean(rewards):.2f}",
+    )
+    distribution_axis.set_xlabel("Total reward")
+    distribution_axis.set_ylabel("Episodes")
+    distribution_axis.set_title("Reward distribution")
+    distribution_axis.grid(axis="y", alpha=0.25)
+    distribution_axis.legend()
+
+    _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
+def plot_evaluation_diagnostics(
+    evaluation: Mapping[str, Sequence[Any]],
+    output_dir: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Create separate plots from greedy ``evaluate_q_learning`` results."""
+    trajectories = evaluation["trajectories"]
+    controls = evaluation["control_values"]
+    rewards = np.asarray(evaluation["episode_rewards"], dtype=np.float64)
+    diverged = np.asarray(evaluation["diverged"], dtype=bool)
+    if len(trajectories) == 0:
+        raise ValueError("Evaluation results contain no trajectories")
+    if len(controls) == 0:
+        raise ValueError("Evaluation results contain no control sequences")
+    if rewards.ndim != 1 or rewards.size == 0:
+        raise ValueError("Evaluation results contain no episode rewards")
+    if len(trajectories) != rewards.size or len(controls) != rewards.size:
+        raise ValueError(
+            "Evaluation results must contain one trajectory and control sequence "
+            "per episode reward"
+        )
+    if diverged.shape != rewards.shape:
+        raise ValueError(
+            "evaluation['diverged'] must have one value per episode reward"
+        )
+
+    trajectory_arrays = [
+        np.asarray(trajectory, dtype=np.float64) for trajectory in trajectories
+    ]
+    for trajectory in trajectory_arrays:
+        if (
+            trajectory.ndim != 2
+            or trajectory.shape[1] != 3
+            or trajectory.shape[0] == 0
+        ):
+            raise ValueError("Each evaluation trajectory must have shape (n, 3)")
+
+    first_trajectory = trajectory_arrays[0]
+    first_controls = np.asarray(controls[0], dtype=np.float64)
+    if first_controls.ndim != 1:
+        raise ValueError("Each evaluation control sequence must be one-dimensional")
+    expected_controls = first_trajectory.shape[0] - 1
+    if first_controls.size != expected_controls:
+        raise ValueError(
+            "The first control sequence must contain one value per transition; "
+            f"expected {expected_controls}, received {first_controls.size}"
+        )
+    state_times = _lyapunov_time_axis(first_trajectory.shape[0])
+    control_times = state_times[:-1]
+    rounded_time_end = float(np.rint(state_times[-1]))
+    display_time_end = (
+        rounded_time_end
+        if np.isclose(state_times[-1], rounded_time_end, atol=0.02)
+        else float(state_times[-1])
+    )
+
+    def output_path(filename: str) -> Path | None:
+        return None if output_dir is None else output_dir / filename
+
+    trajectory_figure = plt.figure(figsize=(9, 7))
+    trajectory_axis = trajectory_figure.add_subplot(111, projection="3d")
+    trajectory_colors = plt.cm.viridis(
+        np.linspace(0.08, 0.92, len(trajectory_arrays))
+    )
+    label_episodes = len(trajectory_arrays) <= 10
+    for episode, (trajectory, color) in enumerate(
+        zip(trajectory_arrays, trajectory_colors), start=1
+    ):
+        trajectory_axis.plot(
+            trajectory[:, 0],
+            trajectory[:, 1],
+            trajectory[:, 2],
+            color=color,
+            linewidth=0.65,
+            alpha=0.85,
+            label=f"Episode {episode}" if label_episodes else None,
+        )
+    trajectory_axis.set_xlabel("x")
+    trajectory_axis.set_ylabel("y")
+    trajectory_axis.set_zlabel("z")
+    trajectory_axis.set_title("All evaluation trajectories")
+    if label_episodes:
+        trajectory_axis.legend()
+    _finish_figure(
+        trajectory_figure,
+        output_path("evaluation_trajectory.png"),
+        show=show,
+        dpi=dpi,
+    )
+
+    attractor_segments = np.stack(
+        (first_trajectory[:-1], first_trajectory[1:]),
+        axis=1,
+    )
+    control_min = float(np.min(first_controls))
+    control_max = float(np.max(first_controls))
+    if np.isclose(control_min, control_max):
+        color_padding = max(1.0, abs(control_min) * 0.05)
+        control_min -= color_padding
+        control_max += color_padding
+    control_norm = Normalize(vmin=control_min, vmax=control_max)
+
+    attractor_figure = plt.figure(figsize=(10, 8))
+    attractor_axis = attractor_figure.add_subplot(111, projection="3d")
+    colored_trajectory = Line3DCollection(
+        attractor_segments,
+        cmap="coolwarm",
+        norm=control_norm,
+        linewidth=0.7,
+        alpha=0.9,
+    )
+    colored_trajectory.set_array(first_controls)
+    attractor_axis.add_collection3d(colored_trajectory)
+    attractor_axis.auto_scale_xyz(
+        first_trajectory[:, 0],
+        first_trajectory[:, 1],
+        first_trajectory[:, 2],
+    )
+    attractor_axis.set_xlabel("X Axis")
+    attractor_axis.set_ylabel("Y Axis")
+    attractor_axis.set_zlabel("Z Axis")
+    attractor_axis.set_title("Controlled trajectory (regularized tabular Q-learning)")
+    attractor_figure.colorbar(
+        colored_trajectory,
+        ax=attractor_axis,
+        label="control u",
+        pad=0.12,
+        shrink=0.75,
+    )
+    _finish_figure(
+        attractor_figure,
+        output_path("evaluation_control_colored_attractor.png"),
+        show=show,
+        dpi=dpi,
+    )
+
+    state_figure, state_axis = plt.subplots(figsize=(14, 5))
+    for index, label in enumerate(("x", "y", "z")):
+        state_axis.plot(
+            state_times,
+            first_trajectory[:, index],
+            linewidth=0.8,
+            label=label,
+        )
+    state_axis.axhline(0.0, color="black", linestyle="--", linewidth=1.0)
+    state_axis.set_xlim(0.0, display_time_end)
+    state_axis.set_xlabel("Lyapunov times (t / τ)")
+    state_axis.set_ylabel("State")
+    state_axis.set_title("Controlled Lorenz trajectory: first evaluation episode")
+    state_axis.grid(alpha=0.25)
+    state_axis.legend(loc="upper right", ncol=3)
+    _finish_figure(
+        state_figure,
+        output_path("evaluation_state_coordinates.png"),
+        show=show,
+        dpi=dpi,
+    )
+
+    control_figure, control_axis = plt.subplots(figsize=(14, 4))
+    control_axis.step(control_times, first_controls, where="post", color="tab:orange")
+    control_axis.set_xlim(0.0, display_time_end)
+    control_axis.set_xlabel("Lyapunov times (t / τ)")
+    control_axis.set_ylabel("Control u")
+    control_axis.set_title("First evaluation episode: greedy control signal")
+    control_axis.grid(alpha=0.25)
+    _finish_figure(
+        control_figure,
+        output_path("evaluation_control_signal.png"),
+        show=show,
+        dpi=dpi,
+    )
+
+    reward_figure, reward_axis = plt.subplots(figsize=(9, 5))
+    episode_numbers = np.arange(1, rewards.size + 1)
+    colors = np.where(diverged, "tab:red", "tab:purple")
+    reward_axis.bar(episode_numbers, rewards, color=colors, alpha=0.82)
+    reward_axis.axhline(float(np.mean(rewards)), color="black", linestyle="--", linewidth=1)
+    reward_axis.set_xlabel("Evaluation episode")
+    reward_axis.set_ylabel("Total reward")
+    reward_axis.set_xticks(episode_numbers)
+    reward_axis.set_title(f"Evaluation rewards (mean {np.mean(rewards):.2f})")
+    reward_axis.grid(axis="y", alpha=0.25)
+    _finish_figure(
+        reward_figure,
+        output_path("evaluation_rewards.png"),
+        show=show,
+        dpi=dpi,
+    )
+
+
+def plot_q_table_diagnostics(
+    agent: Any,
+    actions: Sequence[float],
+    reference_state: Sequence[float],
+    output_path: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Visualize learned table values without implementing a policy."""
+    q_table = np.asarray(agent.q_table, dtype=np.float64)
+    if q_table.ndim != 4:
+        raise ValueError(f"Expected a 4-D Q-table, received shape {q_table.shape}")
+    if any(size == 0 for size in q_table.shape):
+        raise ValueError(f"Q-table dimensions must be nonzero, received {q_table.shape}")
+
+    action_values = np.asarray(actions, dtype=np.float64)
+    if action_values.ndim != 1 or action_values.size != q_table.shape[-1]:
+        raise ValueError(
+            "actions must be one-dimensional with one value per Q-table action; "
+            f"expected {q_table.shape[-1]}, received shape {action_values.shape}"
+        )
+
+    reference_bin = agent.discretize_state(reference_state)
+    z_index = reference_bin[2]
+    bounds = np.asarray(agent.discretizer.bounds, dtype=np.float64)
+    extent = [bounds[1, 0], bounds[1, 1], bounds[0, 0], bounds[0, 1]]
+    max_values = np.max(q_table[:, :, z_index, :], axis=-1)
+    mean_values = np.mean(q_table[:, :, z_index, :], axis=-1)
+    update_fraction = np.count_nonzero(q_table, axis=(0, 1, 3)) / (
+        q_table.shape[0] * q_table.shape[1] * q_table.shape[3]
+    )
+    reference_values = q_table[reference_bin]
+
+    figure, axes = plt.subplots(2, 2, figsize=(13, 9))
+    figure.suptitle("Learned Q-table diagnostics", fontsize=15)
+
+    max_axis = axes[0, 0]
+    max_image = max_axis.imshow(
+        max_values,
+        origin="lower",
+        aspect="auto",
+        extent=extent,
+        cmap="viridis",
+    )
+    max_axis.set_xlabel("y")
+    max_axis.set_ylabel("x")
+    max_axis.set_title(f"Maximum action value at z-bin {z_index}")
+    figure.colorbar(max_image, ax=max_axis, label="max Q")
+
+    mean_axis = axes[0, 1]
+    mean_image = mean_axis.imshow(
+        mean_values,
+        origin="lower",
+        aspect="auto",
+        extent=extent,
+        cmap="coolwarm",
+    )
+    mean_axis.set_xlabel("y")
+    mean_axis.set_ylabel("x")
+    mean_axis.set_title(f"Mean action value at z-bin {z_index}")
+    figure.colorbar(mean_image, ax=mean_axis, label="mean Q")
+
+    coverage_axis = axes[1, 0]
+    coverage_axis.plot(np.arange(q_table.shape[2]), update_fraction, marker="o")
+    coverage_axis.axvline(z_index, color="tab:red", linestyle="--", label="Reference bin")
+    coverage_axis.set_xlabel("z-bin")
+    coverage_axis.set_ylabel("Fraction of nonzero entries")
+    coverage_axis.set_ylim(-0.02, 1.02)
+    coverage_axis.set_title("Table coverage by z-bin")
+    coverage_axis.grid(alpha=0.25)
+    coverage_axis.legend()
+
+    values_axis = axes[1, 1]
+    values_axis.plot(action_values, reference_values, marker="o", color="tab:purple")
+    values_axis.axhline(0.0, color="black", linewidth=0.8)
+    values_axis.set_xlabel("Discrete control value")
+    values_axis.set_ylabel("Q value")
+    values_axis.set_title(f"Action values at state bin {reference_bin}")
+    values_axis.grid(alpha=0.25)
+
+    _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
+def _parse_state_bins(values: Sequence[int]) -> int | tuple[int, int, int]:
+    if any(value < 1 for value in values):
+        raise ValueError("--state-bins values must be at least 1")
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 3:
+        return tuple(values)  # type: ignore[return-value]
+    raise ValueError("--state-bins requires either one integer or three integers")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--episodes", type=int, default=500)
+    parser.add_argument("--eval-episodes", type=int, default=5)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Optional training-step cap per episode",
+    )
+    parser.add_argument(
+        "--eval-max-steps",
+        type=int,
+        default=None,
+        help="Optional evaluation-step cap; defaults to the full evaluation horizon",
+    )
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--lyapunov-times",
+        type=float,
+        default=2.0,
+        help="Training episode length in Lyapunov times",
+    )
+    parser.add_argument(
+        "--eval-lyapunov-times",
+        type=float,
+        default=50.0,
+        help="Evaluation episode length in Lyapunov times",
+    )
+    parser.add_argument("--control-cost", type=float, default=qlearning.LAMBDA)
+    parser.add_argument("--action-low", type=float, default=-qlearning.U_REF)
+    parser.add_argument("--action-high", type=float, default=qlearning.U_REF)
+    parser.add_argument("--action-bins", type=int, default=9)
+    parser.add_argument("--state-bins", type=int, nargs="+", default=[15, 15, 15])
+    parser.add_argument("--learning-rate", type=float, default=0.15)
+    parser.add_argument("--discount-factor", type=float, default=0.99)
+    parser.add_argument("--epsilon", type=float, default=1.0)
+    parser.add_argument("--epsilon-decay", type=float, default=0.99)
+    parser.add_argument("--epsilon-min", type=float, default=0.05)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(__file__).with_name("q_learning_plots"),
+    )
+    parser.add_argument("--dpi", type=int, default=160)
+    parser.add_argument("--show", action="store_true", help="Display figures interactively")
+    parser.add_argument(
+        "--no-save", action="store_true", help="Do not write PNG files"
+    )
+    return parser
+
+
+def main() -> None:
+    """Train through QLearning.py, evaluate greedily, and plot diagnostics."""
+    parser = _build_parser()
+    args = parser.parse_args()
+    try:
+        state_bins = _parse_state_bins(args.state_bins)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.dpi < 1:
+        parser.error("--dpi must be at least 1")
+    if args.episodes < 1:
+        parser.error("--episodes must be at least 1")
+    if args.eval_episodes < 1:
+        parser.error("--eval-episodes must be at least 1")
+    if args.max_steps is not None and args.max_steps < 1:
+        parser.error("--max-steps must be at least 1")
+    if args.eval_max_steps is not None and args.eval_max_steps < 1:
+        parser.error("--eval-max-steps must be at least 1")
+    if not np.isfinite(args.lyapunov_times) or args.lyapunov_times <= 0.0:
+        parser.error("--lyapunov-times must be positive")
+    if (
+        not np.isfinite(args.eval_lyapunov_times)
+        or args.eval_lyapunov_times <= 0.0
+    ):
+        parser.error("--eval-lyapunov-times must be positive")
+    if not np.isfinite(args.control_cost) or args.control_cost < 0.0:
+        parser.error("--control-cost must be nonnegative")
+    if args.action_bins < 1:
+        parser.error("--action-bins must be at least 1")
+    if not np.isfinite([args.action_low, args.action_high]).all():
+        parser.error("--action-low and --action-high must be finite")
+    if args.action_low >= args.action_high:
+        parser.error("--action-low must be below --action-high")
+    if not 0.0 < args.learning_rate <= 1.0:
+        parser.error("--learning-rate must be in (0, 1]")
+    if not 0.0 <= args.discount_factor <= 1.0:
+        parser.error("--discount-factor must be in [0, 1]")
+    if not 0.0 <= args.epsilon_min <= args.epsilon <= 1.0:
+        parser.error("require 0 <= --epsilon-min <= --epsilon <= 1")
+    if not 0.0 < args.epsilon_decay <= 1.0:
+        parser.error("--epsilon-decay must be in (0, 1]")
+
+    reference_state = np.asarray(qlearning.INITIAL_STATE, dtype=np.float64).copy()
+    initial_state_rng = np.random.default_rng(args.seed)
+
+    def seeded_initial_state() -> np.ndarray:
+        return reference_state + initial_state_rng.normal(0.0, 0.1, size=3)
+
+    training_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.lyapunov_times,
+        action_type="discrete",
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=seeded_initial_state,
+        regularized=True,
+        u_ref=qlearning.U_REF,
+    )
+    agent = QLearningAgent(
+        n_actions=len(training_env.actions),
+        learning_rate=args.learning_rate,
+        discount_factor=args.discount_factor,
+        epsilon=args.epsilon,
+        epsilon_decay=args.epsilon_decay,
+        epsilon_min=args.epsilon_min,
+        state_bins=state_bins,
+        random_seed=args.seed,
+    )
+
+    history = train_q_learning(
+        training_env,
+        agent,
+        args.episodes,
+        args.max_steps,
+    )
+    evaluation_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.eval_lyapunov_times,
+        action_type="discrete",
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=seeded_initial_state,
+        regularized=True,
+        u_ref=qlearning.U_REF,
+    )
+    table_before_evaluation = agent.q_table.copy()
+    evaluation = evaluate_q_learning(
+        evaluation_env,
+        agent,
+        args.eval_episodes,
+        args.eval_max_steps,
+        x0=None,
+    )
+    if not np.array_equal(table_before_evaluation, agent.q_table):
+        raise RuntimeError("Greedy evaluation unexpectedly changed the Q-table")
+
+    output_dir = None if args.no_save else args.output_dir.expanduser().resolve()
+    plot_training_diagnostics(
+        history,
+        None if output_dir is None else output_dir / "training_diagnostics.png",
+        show=args.show,
+        dpi=args.dpi,
+    )
+    plot_evaluation_diagnostics(
+        evaluation,
+        output_dir,
+        show=args.show,
+        dpi=args.dpi,
+    )
+    plot_q_table_diagnostics(
+        agent,
+        training_env.actions,
+        reference_state.tolist(),
+        None if output_dir is None else output_dir / "q_table_diagnostics.png",
+        show=args.show,
+        dpi=args.dpi,
+    )
+
+    final_window = min(50, len(history["episode_rewards"]))
+    final_rewards = np.asarray(history["episode_rewards"][-final_window:], dtype=float)
+    evaluation_rewards = np.asarray(evaluation["episode_rewards"], dtype=float)
+    print(f"Final epsilon: {agent.epsilon:.4f}")
+    print(f"Mean reward over final {final_window} episodes: {np.mean(final_rewards):.4f}")
+    print(f"Mean greedy evaluation reward: {np.mean(evaluation_rewards):.4f}")
+    print(f"Evaluation divergences: {sum(evaluation['diverged'])}/{args.eval_episodes}")
+    print(f"Nonzero Q-table entries: {np.count_nonzero(agent.q_table)}/{agent.q_table.size}")
+
+    if args.show:
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()
