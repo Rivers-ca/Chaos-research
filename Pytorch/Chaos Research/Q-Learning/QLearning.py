@@ -11,6 +11,7 @@ hyperparameters are necessarily specific to the gradient-free method.
 """
 
 import argparse
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, TypedDict, cast
 
 class TrainingHistory(TypedDict):
@@ -41,6 +42,52 @@ DEFAULT_STATE_BOUNDS: Tuple[Tuple[float, float], ...] = (
     (-30.0, 30.0),
     (0.0, 60.0),
 )
+
+
+@dataclass(frozen=True)
+class ExperimentDefaults:
+    """Shared runnable experiment settings used by both Q-learning scripts.
+
+    Edit this block when changing experiment parameters.  ``QLearning.py`` and
+    ``PlotQLearning.py`` both read the same values, while command-line options
+    can still override them for a single run.
+    """
+
+    # Episode settings
+    episodes: int = 600
+    eval_episodes: int = 5
+    max_steps: Optional[int] = None
+    eval_max_steps: Optional[int] = None
+
+    # Reproducibility
+    seed: int = 7
+
+    # Simulation duration
+    training_lyapunov_times: float = 2.0
+    evaluation_lyapunov_times: float = 50.0
+
+    # Control settings
+    control_cost: float = LAMBDA
+    regularized: bool = True
+    action_low: float = -U_REF
+    action_high: float = U_REF
+    action_bins: int = 9
+
+    # State discretization
+    state_bins: Tuple[int, int, int] = (15, 15, 15)
+
+    # Q-learning hyperparameters
+    learning_rate: float = 0.01
+    discount_factor: float = 1.0
+    epsilon: float = 1.0
+    epsilon_decay: float = 0.50
+    epsilon_min: float = 0.05
+
+    # Initial-condition perturbation
+    initial_state_noise: float = 0.1
+
+
+EXPERIMENT_DEFAULTS = ExperimentDefaults()
 
 
 def lyapunov_times_to_steps(lyapunov_times: float) -> int:
@@ -662,15 +709,50 @@ def evaluate_q_learning(
 
 def main() -> None:
     """Run a configurable tabular Q-learning example."""
+    defaults = EXPERIMENT_DEFAULTS
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--episodes", type=int, default=600)
-    parser.add_argument("--eval-episodes", type=int, default=5)
-    parser.add_argument("--max-steps", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--episodes", type=int, default=defaults.episodes)
+    parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
+    parser.add_argument("--max-steps", type=int, default=defaults.max_steps)
+    parser.add_argument("--eval-max-steps", type=int, default=defaults.eval_max_steps)
+    parser.add_argument("--seed", type=int, default=defaults.seed)
+    parser.add_argument(
+        "--lyapunov-times",
+        type=float,
+        default=defaults.training_lyapunov_times,
+    )
+    parser.add_argument(
+        "--eval-lyapunov-times",
+        type=float,
+        default=defaults.evaluation_lyapunov_times,
+    )
+    parser.add_argument("--control-cost", type=float, default=defaults.control_cost)
     parser.add_argument(
         "--regularized",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.regularized,
         help="include LAMBDA times normalized control effort",
+    )
+    parser.add_argument("--action-low", type=float, default=defaults.action_low)
+    parser.add_argument("--action-high", type=float, default=defaults.action_high)
+    parser.add_argument("--action-bins", type=int, default=defaults.action_bins)
+    parser.add_argument(
+        "--state-bins",
+        type=int,
+        nargs=3,
+        default=list(defaults.state_bins),
+    )
+    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
+    parser.add_argument(
+        "--discount-factor", type=float, default=defaults.discount_factor
+    )
+    parser.add_argument("--epsilon", type=float, default=defaults.epsilon)
+    parser.add_argument("--epsilon-decay", type=float, default=defaults.epsilon_decay)
+    parser.add_argument("--epsilon-min", type=float, default=defaults.epsilon_min)
+    parser.add_argument(
+        "--initial-state-noise",
+        type=float,
+        default=defaults.initial_state_noise,
     )
     args = parser.parse_args()
     if args.episodes < 1:
@@ -679,36 +761,63 @@ def main() -> None:
         parser.error("--eval-episodes must be at least 1")
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.eval_max_steps is not None and args.eval_max_steps < 1:
+        parser.error("--eval-max-steps must be at least 1")
+    if args.lyapunov_times <= 0.0 or args.eval_lyapunov_times <= 0.0:
+        parser.error("Lyapunov-time horizons must be positive")
+    if args.initial_state_noise < 0.0:
+        parser.error("--initial-state-noise must be nonnegative")
 
-    env = LorenzEnvEuler(
-        alpha=LAMBDA,
-        lyapunov_times=20.0,
+    initial_state_rng = np.random.default_rng(args.seed)
+
+    def seeded_initial_state() -> np.ndarray:
+        return INITIAL_STATE + initial_state_rng.normal(
+            0.0, args.initial_state_noise, size=3
+        )
+
+    training_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.lyapunov_times,
         action_type="discrete",
-        action_bounds=(-U_REF, U_REF),
-        n_action_bins=9,
-        ic_dist=lambda: INITIAL_STATE.copy(),
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=seeded_initial_state,
         regularized=args.regularized,
         u_ref=U_REF,
     )
     agent = QLearningAgent(
-        n_actions=len(env.actions),
-        learning_rate=0.01,
-        # An undiscounted return matches the trajectory-mean reference loss.
-        discount_factor=1.0,
-        epsilon=1.0,
-        epsilon_decay=0.50,
-        epsilon_min=0.05,
-        state_bins=(15, 15, 15),
+        n_actions=len(training_env.actions),
+        learning_rate=args.learning_rate,
+        discount_factor=args.discount_factor,
+        epsilon=args.epsilon,
+        epsilon_decay=args.epsilon_decay,
+        epsilon_min=args.epsilon_min,
+        state_bins=tuple(args.state_bins),
         random_seed=args.seed,
     )
 
-    history = train_q_learning(env, agent, args.episodes, args.max_steps)
+    history = train_q_learning(
+        training_env,
+        agent,
+        args.episodes,
+        args.max_steps,
+    )
+    evaluation_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.eval_lyapunov_times,
+        action_type="discrete",
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=seeded_initial_state,
+        regularized=args.regularized,
+        u_ref=U_REF,
+    )
     evaluation = evaluate_q_learning(
-        env,
+        evaluation_env,
         agent,
         args.eval_episodes,
-        args.max_steps,
-        x0=INITIAL_STATE,
+        args.eval_max_steps,
+        x0=None,
     )
 
     window = min(50, len(history["episode_rewards"]))
