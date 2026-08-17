@@ -1,14 +1,4 @@
-"""Controlled Lorenz environment and a tabular Q-learning workflow.
-
-The Lorenz dynamics remain continuous.  A coarse, configurable discretization
-makes a finite Q-table possible, at the cost of losing detail within each bin.
-This is tabular Q-learning, not deep Q-learning.
-
-The physical parameters, Euler convention, initial condition, horizon, state
-objective, and optional control regularization match the gradient-based
-reference implementation.  The finite action/state grids and the Q-learning
-hyperparameters are necessarily specific to the gradient-free method.
-"""
+"""Controlled Lorenz environment and a tabular Q-learning workflow."""
 
 import argparse
 from dataclasses import dataclass
