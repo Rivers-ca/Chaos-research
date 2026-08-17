@@ -45,12 +45,13 @@ class ExperimentDefaults:
 
     # Episode settings
     episodes: int = 600
-    eval_episodes: int = 5
+    eval_episodes: int = 1
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
 
-    # Reproducibility
-    seed: int = 2
+    # Initial state and optional exploration reproducibility
+    ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
+    exploration_seed: Optional[int] = None
 
     # Simulation duration
     training_lyapunov_times: float = 2.0
@@ -72,10 +73,6 @@ class ExperimentDefaults:
     epsilon: float = 0.99
     epsilon_decay: float = 0.05
     epsilon_min: float = 0.05
-
-    # Initial-condition perturbation
-    initial_state_noise: float = 0.1
-
 
 EXPERIMENT_DEFAULTS = ExperimentDefaults()
 
@@ -293,7 +290,7 @@ class LorenzEnvEuler:
         if self.regularized:
             control_cost = self.alpha * (u / self.u_ref) ** 2 / self.horizon
         reward = -float(state_cost + control_cost)
-        #Here is the PHI REWARD FUNCITON
+        #Here is the  REWARD FUNCITON
         done = diverged
         info: Dict[str, bool] = {}
         if diverged:
@@ -307,8 +304,8 @@ class LorenzEnvEuler:
 
     @staticmethod
     def _euler_step(state: np.ndarray, u: float) -> np.ndarray:
-        # Euler integration simulates the controlled Lorenz dynamics.  It does
-        # not define the reward and is unrelated to how Q-values are updated.
+        # Euler integration simulates the controlled Lorenz dynamics.
+        # Note: replace with RK4 later
         x, y, z = state
         dx = PRANDTL * (y - x) + u
         dy = x * (RAYLEIGH - z) - y
@@ -598,8 +595,13 @@ def train_q_learning(
         "rolling_mean_rewards": _rolling_mean(episode_rewards),
     }
 
+#Creates control function for the Q-learning agent.
+#The control function is used to evaluate the performance of the agent after training.
+#It runs the agent in the environment without exploration and without updating the Q-table,
+# and collects statistics about the episodes.
+#It is an evaluation/control rollout function, not a training function.
 
-def evaluate_q_learning(
+def control_q_learning(
     env: LorenzEnvEuler,
     agent: QLearningAgent,
     num_episodes: int,
@@ -705,7 +707,19 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
     parser.add_argument("--max-steps", type=int, default=defaults.max_steps)
     parser.add_argument("--eval-max-steps", type=int, default=defaults.eval_max_steps)
-    parser.add_argument("--seed", type=int, default=defaults.seed)
+    parser.add_argument(
+        "--initial-condition",
+        type=float,
+        nargs=3,
+        default=list(defaults.ic),
+        metavar=("X0", "Y0", "Z0"),
+    )
+    parser.add_argument(
+        "--exploration-seed",
+        type=int,
+        default=defaults.exploration_seed,
+        help="optional seed for epsilon-greedy exploration only",
+    )
     parser.add_argument(
         "--lyapunov-times",
         type=float,
@@ -739,11 +753,6 @@ def main() -> None:
     parser.add_argument("--epsilon", type=float, default=defaults.epsilon)
     parser.add_argument("--epsilon-decay", type=float, default=defaults.epsilon_decay)
     parser.add_argument("--epsilon-min", type=float, default=defaults.epsilon_min)
-    parser.add_argument(
-        "--initial-state-noise",
-        type=float,
-        default=defaults.initial_state_noise,
-    )
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be at least 1")
@@ -755,15 +764,12 @@ def main() -> None:
         parser.error("--eval-max-steps must be at least 1")
     if args.lyapunov_times <= 0.0 or args.eval_lyapunov_times <= 0.0:
         parser.error("Lyapunov-time horizons must be positive")
-    if args.initial_state_noise < 0.0:
-        parser.error("--initial-state-noise must be nonnegative")
+    ic = np.asarray(args.initial_condition, dtype=np.float64)
+    if ic.shape != (3,) or not np.isfinite(ic).all():
+        parser.error("--initial-condition must contain three finite values")
 
-    initial_state_rng = np.random.default_rng(args.seed)
-
-    def seeded_initial_state() -> np.ndarray:
-        return INITIAL_STATE + initial_state_rng.normal(
-            0.0, args.initial_state_noise, size=3
-        )
+    def fixed_initial_state() -> np.ndarray:
+        return ic.copy()
 
     training_env = LorenzEnvEuler(
         alpha=args.control_cost,
@@ -771,7 +777,7 @@ def main() -> None:
         action_type="discrete",
         action_bounds=(args.action_low, args.action_high),
         n_action_bins=args.action_bins,
-        ic_dist=seeded_initial_state,
+        ic_dist=fixed_initial_state,
         regularized=args.regularized,
         u_ref=U_REF,
     )
@@ -783,7 +789,7 @@ def main() -> None:
         epsilon_decay=args.epsilon_decay,
         epsilon_min=args.epsilon_min,
         state_bins=tuple(args.state_bins),
-        random_seed=args.seed,
+        random_seed=args.exploration_seed,
     )
 
     history = train_q_learning(
@@ -798,21 +804,21 @@ def main() -> None:
         action_type="discrete",
         action_bounds=(args.action_low, args.action_high),
         n_action_bins=args.action_bins,
-        ic_dist=seeded_initial_state,
+        ic_dist=fixed_initial_state,
         regularized=args.regularized,
         u_ref=U_REF,
     )
-    evaluation = evaluate_q_learning(
+    evaluation = control_q_learning(
         evaluation_env,
         agent,
         args.eval_episodes,
         args.eval_max_steps,
-        x0=None,
+        x0=ic,
     )
 
     window = min(50, len(history["episode_rewards"]))
     final_training_rewards = history["episode_rewards"][-window:]
-    sample_bin = agent.discretize_state(INITIAL_STATE.tolist())
+    sample_bin = agent.discretize_state(ic.tolist())
     sample_q_values = agent.q_table[sample_bin]
     first_actions = cast(np.ndarray, evaluation["actions"][0])[:10]
 
