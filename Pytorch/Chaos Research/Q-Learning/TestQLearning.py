@@ -77,7 +77,7 @@ class QLearningRegressionTests(unittest.TestCase):
 
         with np.errstate(over="ignore", invalid="ignore"):
             history = qlearning.train_q_learning(env, agent, num_episodes=1)
-            evaluation = qlearning.evaluate_q_learning(env, agent, num_episodes=1)
+            evaluation = qlearning.control_q_learning(env, agent, num_episodes=1)
 
         self.assertEqual(history["diverged"], [True])
         self.assertTrue(np.isfinite(agent.q_table).all())
