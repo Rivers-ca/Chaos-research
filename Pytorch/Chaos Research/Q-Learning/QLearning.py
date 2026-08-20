@@ -499,8 +499,6 @@ class QLearningAgent:
         table_index = state_index + (action_index,)
         current_value = self.q_table[table_index]
 
-        # This Q-learning update learns action values from observed transitions;
-        # it does not integrate the dynamics or define the control objective.
         if done:
             target = reward_value
         else:
@@ -822,14 +820,17 @@ def main() -> None:
     sample_q_values = agent.q_table[sample_bin]
     first_actions = cast(np.ndarray, evaluation["actions"][0])[:10]
 
-    print(f"Final epsilon: {agent.epsilon:.4f}")
-    print(f"Mean reward over final {window} episodes: {np.mean(final_training_rewards):.4f}")
-    print(f"Mean evaluation objective: {np.mean(evaluation['objectives']):.4f}")
-    print(f"Mean evaluation task loss: {np.mean(evaluation['task_losses']):.4f}")
-    print(f"Mean normalized control effort: {np.mean(evaluation['control_efforts']):.4f}")
-    print(f"Any evaluation episode diverged: {any(evaluation['diverged'])}")
-    print(f"Q-values at state bin {sample_bin}: {np.array2string(sample_q_values, precision=3)}")
-    print(f"First greedy action indices: {first_actions.tolist()}")
+    print(
+        "learned Q-feedback law: Q", sample_bin, "=",
+        np.array2string(sample_q_values, precision=3),
+        "; greedy actions =", first_actions.tolist(),
+        "; epsilon =", f"{agent.epsilon:.4f}",
+        "; final", window, "episode reward =", f"{np.mean(final_training_rewards):.4f}",
+        "; objective =", f"{np.mean(evaluation['objectives']):.4f}",
+        "; task loss =", f"{np.mean(evaluation['task_losses']):.4f}",
+        "; control effort =", f"{np.mean(evaluation['control_efforts']):.4f}",
+        "; diverged =", any(evaluation["diverged"]),
+    )
 
 
 if __name__ == "__main__":
