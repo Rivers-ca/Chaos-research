@@ -867,7 +867,5 @@ def main() -> None:
     if args.show:
         plt.show()
 
-
-
 if __name__ == "__main__":
     main()
