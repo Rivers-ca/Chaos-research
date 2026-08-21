@@ -61,6 +61,7 @@ QLearningAgent = qlearning.QLearningAgent
 train_q_learning = qlearning.train_q_learning
 control_q_learning = qlearning.control_q_learning
 steps_to_lyapunov_times = qlearning.steps_to_lyapunov_times
+make_evaluation_initial_states = qlearning.make_evaluation_initial_states
 
 
 def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
@@ -317,10 +318,16 @@ def plot_evaluation_diagnostics(
             or trajectory.shape[0] == 0
         ):
             raise ValueError("Each evaluation trajectory must have shape (n, 3)")
-    initial_condition_label = np.array2string(
+    reference_condition_label = np.array2string(
         trajectory_arrays[0][0],
         precision=3,
         separator=", ",
+    )
+    initial_states = np.asarray(
+        [trajectory[0] for trajectory in trajectory_arrays], dtype=np.float64
+    )
+    has_perturbed_initial_states = bool(
+        np.any(~np.isclose(initial_states, initial_states[0], rtol=0.0, atol=0.0))
     )
 
     control_arrays = [np.asarray(values, dtype=np.float64) for values in controls]
@@ -443,10 +450,17 @@ def plot_evaluation_diagnostics(
     trajectory_axis.set_xlabel("x")
     trajectory_axis.set_ylabel("y")
     trajectory_axis.set_zlabel("z")
-    trajectory_axis.set_title(
-        f"Evaluation trajectory from fixed initial condition "
-        f"{initial_condition_label}"
-    )
+    if has_perturbed_initial_states:
+        trajectory_title = (
+            "Evaluation trajectories near reference initial condition "
+            f"{reference_condition_label}"
+        )
+    else:
+        trajectory_title = (
+            "Evaluation trajectory from fixed initial condition "
+            f"{reference_condition_label}"
+        )
+    trajectory_axis.set_title(trajectory_title)
     if label_trials:
         trajectory_axis.legend(title="Evaluation trial")
     _finish_figure(
@@ -462,9 +476,14 @@ def plot_evaluation_diagnostics(
         figsize=(14, 10),
         sharex=True,
     )
+    initial_state_description = (
+        "perturbed initial conditions"
+        if has_perturbed_initial_states
+        else "a fixed initial condition"
+    )
     state_figure.suptitle(
-        f"State response from fixed initial condition {initial_condition_label}\n"
-        "Greedy Q-table evaluation with no initial-state perturbation"
+        f"State responses near reference initial condition {reference_condition_label}\n"
+        f"Greedy Q-table evaluation with {initial_state_description}"
     )
     for coordinate, (state_axis, coordinate_label) in enumerate(
         zip(state_axes, ("x", "y", "z"))
@@ -655,6 +674,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional seed for epsilon-greedy exploration only",
     )
     parser.add_argument(
+        "--evaluation-seed",
+        type=int,
+        default=defaults.evaluation_seed,
+        help="seed for evaluation initial-condition perturbations",
+    )
+    parser.add_argument(
+        "--eval-ic-perturbation",
+        type=float,
+        default=defaults.evaluation_ic_perturbation,
+        help="maximum per-coordinate perturbation after evaluation Trial 1",
+    )
+    parser.add_argument(
         "--lyapunov-times",
         type=float,
         default=defaults.training_lyapunov_times,
@@ -727,6 +758,8 @@ def main() -> None:
         or args.eval_lyapunov_times <= 0.0
     ):
         parser.error("--eval-lyapunov-times must be positive")
+    if not np.isfinite(args.eval_ic_perturbation) or args.eval_ic_perturbation < 0.0:
+        parser.error("--eval-ic-perturbation must be finite and nonnegative")
     if not np.isfinite(args.control_cost) or args.control_cost < 0.0:
         parser.error("--control-cost must be nonnegative")
     if args.action_bins < 1:
@@ -788,12 +821,18 @@ def main() -> None:
         u_ref=qlearning.U_REF,
     )
     table_before_evaluation = agent.q_table.copy()
+    evaluation_initial_states = make_evaluation_initial_states(
+        reference_state,
+        args.eval_episodes,
+        args.eval_ic_perturbation,
+        args.evaluation_seed,
+    )
     evaluation = control_q_learning(
         evaluation_env,
         agent,
         args.eval_episodes,
         args.eval_max_steps,
-        x0=reference_state,
+        initial_states=evaluation_initial_states,
     )
     if not np.array_equal(table_before_evaluation, agent.q_table):
         raise RuntimeError("Greedy evaluation unexpectedly changed the Q-table")
