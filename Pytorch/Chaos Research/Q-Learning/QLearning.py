@@ -88,6 +88,41 @@ def steps_to_lyapunov_times(steps: int) -> float:
     return steps * LYAPUNOV_EXP * DT
 
 
+def make_evaluation_initial_states(
+    reference_state: Sequence[float],
+    num_episodes: int,
+    perturbation: float = 0.01,
+    random_seed: Optional[int] = 0,
+) -> np.ndarray:
+    """Create reproducible evaluation starts around a reference state.
+
+    Trial 1 uses the exact reference state. Each later trial receives an
+    independent uniform perturbation in ``[-perturbation, perturbation]`` for
+    each coordinate.
+    """
+    reference = np.asarray(reference_state, dtype=np.float64)
+    if reference.shape != (3,) or not np.isfinite(reference).all():
+        raise ValueError("reference_state must contain three finite values")
+    if not isinstance(num_episodes, (int, np.integer)) or isinstance(
+        num_episodes, (bool, np.bool_)
+    ):
+        raise TypeError("num_episodes must be an integer")
+    if num_episodes < 1:
+        raise ValueError("num_episodes must be at least 1")
+    if not np.isfinite(perturbation) or perturbation < 0.0:
+        raise ValueError("perturbation must be finite and nonnegative")
+
+    starts = np.repeat(reference[None, :], int(num_episodes), axis=0)
+    if num_episodes > 1 and perturbation > 0.0:
+        rng = np.random.default_rng(random_seed)
+        starts[1:] += rng.uniform(
+            -perturbation,
+            perturbation,
+            size=(num_episodes - 1, 3),
+        )
+    return starts
+
+
 def phi(x: Union[float, np.ndarray], eps: float = EPS) -> Union[float, np.ndarray]:
     """Smooth indicator used by the gradient-based reference objective."""
     return 0.5 * (1.0 + np.tanh(x / eps))
