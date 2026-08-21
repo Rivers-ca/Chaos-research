@@ -44,17 +44,19 @@ class ExperimentDefaults:
 
     # Episode settings
     episodes: int = 600
-    eval_episodes: int = 1
+    eval_episodes: int = 5
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
 
     # Initial state and optional exploration reproducibility
     ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
     exploration_seed: Optional[int] = None
+    evaluation_seed: Optional[int] = 0
+    evaluation_ic_perturbation: float = 0.01
 
     # Simulation duration
-    training_lyapunov_times: float = 2.0
-    evaluation_lyapunov_times: float = 20.0
+    training_lyapunov_times: float = 10.0
+    evaluation_lyapunov_times: float = 50.0
 
     # Control settings
     control_cost: float = LAMBDA
@@ -64,13 +66,13 @@ class ExperimentDefaults:
     action_bins: int = 9
 
     # State discretization
-    state_bins: Tuple[int, int, int] = (15, 15, 15)
+    state_bins: Tuple[int, int, int] = (30, 30, 30)
 
     # Q-learning hyperparameters
     learning_rate: float = 0.01
     discount_factor: float = 1.0
     epsilon: float = 0.99
-    epsilon_decay: float = 0.05
+    epsilon_decay: float = 0.5
     epsilon_min: float = 0.05
 
 EXPERIMENT_DEFAULTS = ExperimentDefaults()
@@ -84,6 +86,41 @@ def lyapunov_times_to_steps(lyapunov_times: float) -> int:
 def steps_to_lyapunov_times(steps: int) -> float:
     """Convert a step count to a duration in Lyapunov times."""
     return steps * LYAPUNOV_EXP * DT
+
+
+def make_evaluation_initial_states(
+    reference_state: Sequence[float],
+    num_episodes: int,
+    perturbation: float = 0.01,
+    random_seed: Optional[int] = 0,
+) -> np.ndarray:
+    """Create reproducible evaluation starts around a reference state.
+
+    Trial 1 uses the exact reference state. Each later trial receives an
+    independent uniform perturbation in ``[-perturbation, perturbation]`` for
+    each coordinate.
+    """
+    reference = np.asarray(reference_state, dtype=np.float64)
+    if reference.shape != (3,) or not np.isfinite(reference).all():
+        raise ValueError("reference_state must contain three finite values")
+    if not isinstance(num_episodes, (int, np.integer)) or isinstance(
+        num_episodes, (bool, np.bool_)
+    ):
+        raise TypeError("num_episodes must be an integer")
+    if num_episodes < 1:
+        raise ValueError("num_episodes must be at least 1")
+    if not np.isfinite(perturbation) or perturbation < 0.0:
+        raise ValueError("perturbation must be finite and nonnegative")
+
+    starts = np.repeat(reference[None, :], int(num_episodes), axis=0)
+    if num_episodes > 1 and perturbation > 0.0:
+        rng = np.random.default_rng(random_seed)
+        starts[1:] += rng.uniform(
+            -perturbation,
+            perturbation,
+            size=(num_episodes - 1, 3),
+        )
+    return starts
 
 
 def phi(x: Union[float, np.ndarray], eps: float = EPS) -> Union[float, np.ndarray]:
@@ -564,11 +601,13 @@ def control_q_learning(
     num_episodes: int,
     max_steps: Optional[int] = None,
     x0: Optional[np.ndarray] = None,
+    initial_states: Optional[Sequence[Sequence[float]]] = None,
 ) -> EvaluationResults:
     """Evaluate greedily without exploration or Q-table updates.
 
-    Each trajectory includes its initial state.  ``actions`` contains discrete
-    action indices; ``control_values`` contains their corresponding controls.
+    Each trajectory includes its initial state. ``initial_states`` may provide
+    one distinct start per episode. ``actions`` contains discrete action
+    indices; ``control_values`` contains their corresponding controls.
     """
     _validate_discrete_pair(env, agent)
     if not isinstance(num_episodes, (int, np.integer)) or isinstance(
@@ -577,6 +616,15 @@ def control_q_learning(
         raise TypeError("num_episodes must be an integer")
     if num_episodes < 1:
         raise ValueError("num_episodes must be at least 1")
+    if x0 is not None and initial_states is not None:
+        raise ValueError("provide either x0 or initial_states, not both")
+    episode_initial_states: Optional[np.ndarray] = None
+    if initial_states is not None:
+        episode_initial_states = np.asarray(initial_states, dtype=np.float64)
+        if episode_initial_states.shape != (num_episodes, 3):
+            raise ValueError("initial_states must have shape (num_episodes, 3)")
+        if not np.isfinite(episode_initial_states).all():
+            raise ValueError("initial_states must contain only finite values")
     if max_steps is not None:
         if not isinstance(max_steps, (int, np.integer)) or isinstance(
             max_steps, (bool, np.bool_)
@@ -595,8 +643,13 @@ def control_q_learning(
     control_efforts: List[float] = []
     objectives: List[float] = []
 
-    for _ in range(num_episodes):
-        state = env.reset(x0=x0)
+    for episode_index in range(num_episodes):
+        episode_x0 = (
+            episode_initial_states[episode_index]
+            if episode_initial_states is not None
+            else x0
+        )
+        state = env.reset(x0=episode_x0)
         states = [state.copy()]
         actions: List[int] = []
         controls: List[float] = []
@@ -678,6 +731,18 @@ def main() -> None:
         help="optional seed for epsilon-greedy exploration only",
     )
     parser.add_argument(
+        "--evaluation-seed",
+        type=int,
+        default=defaults.evaluation_seed,
+        help="seed for evaluation initial-condition perturbations",
+    )
+    parser.add_argument(
+        "--eval-ic-perturbation",
+        type=float,
+        default=defaults.evaluation_ic_perturbation,
+        help="maximum per-coordinate perturbation after evaluation Trial 1",
+    )
+    parser.add_argument(
         "--lyapunov-times",
         type=float,
         default=defaults.training_lyapunov_times,
@@ -721,6 +786,8 @@ def main() -> None:
         parser.error("--eval-max-steps must be at least 1")
     if args.lyapunov_times <= 0.0 or args.eval_lyapunov_times <= 0.0:
         parser.error("Lyapunov-time horizons must be positive")
+    if not np.isfinite(args.eval_ic_perturbation) or args.eval_ic_perturbation < 0.0:
+        parser.error("--eval-ic-perturbation must be finite and nonnegative")
     ic = np.asarray(args.initial_condition, dtype=np.float64)
     if ic.shape != (3,) or not np.isfinite(ic).all():
         parser.error("--initial-condition must contain three finite values")
@@ -765,12 +832,18 @@ def main() -> None:
         regularized=args.regularized,
         u_ref=U_REF,
     )
+    evaluation_initial_states = make_evaluation_initial_states(
+        ic.tolist(),
+        args.eval_episodes,
+        args.eval_ic_perturbation,
+        args.evaluation_seed,
+    )
     evaluation = control_q_learning(
         evaluation_env,
         agent,
         args.eval_episodes,
         args.eval_max_steps,
-        x0=ic,
+        initial_states=evaluation_initial_states.tolist(),
     )
 
     window = min(50, len(history["episode_rewards"]))
