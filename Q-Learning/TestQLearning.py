@@ -160,6 +160,35 @@ class QLearningRegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             qlearning.StateDiscretizer(bins=2.5)
 
+    def test_evaluation_trials_use_reproducible_distinct_initial_states(self) -> None:
+        starts = qlearning.make_evaluation_initial_states(
+            [0.0, 1.0, 1.05], 4, perturbation=0.01, random_seed=7
+        )
+        repeated = qlearning.make_evaluation_initial_states(
+            [0.0, 1.0, 1.05], 4, perturbation=0.01, random_seed=7
+        )
+
+        np.testing.assert_array_equal(starts, repeated)
+        np.testing.assert_array_equal(starts[0], [0.0, 1.0, 1.05])
+        self.assertTrue(np.all(np.abs(starts[1:] - starts[0]) <= 0.01))
+        self.assertEqual(np.unique(starts, axis=0).shape[0], 4)
+
+        env = qlearning.LorenzEnvEuler(
+            lyapunov_times=0.02,
+            action_type="discrete",
+            n_action_bins=3,
+        )
+        agent = qlearning.QLearningAgent(
+            n_actions=3, epsilon=0.0, epsilon_min=0.0
+        )
+        evaluation = qlearning.control_q_learning(
+            env, agent, num_episodes=4, initial_states=starts
+        )
+        actual_starts = np.asarray(
+            [trajectory[0] for trajectory in evaluation["trajectories"]]
+        )
+        np.testing.assert_array_equal(actual_starts, starts)
+
 
 if __name__ == "__main__":
     unittest.main()
