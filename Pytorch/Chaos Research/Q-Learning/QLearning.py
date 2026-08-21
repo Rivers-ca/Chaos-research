@@ -18,7 +18,6 @@ import numpy as np
 RAYLEIGH = 28
 PRANDTL = 10
 B = 8 / 3
-TIMESTEPS = 5000
 DT = 0.01
 LYAPUNOV_EXP = 0.9056
 EPS = 2.0
@@ -256,9 +255,10 @@ class LorenzEnvEuler:
 
         state_is_finite = bool(np.isfinite(self.state).all())
         diverged = not state_is_finite
-        if state_is_finite:
+        if state_is_finite and np.isfinite(self.divergence_threshold):
             # Compare the Euclidean norm without overflowing while squaring a
-            # very large, but still finite, state.
+            # very large, but still finite, state. Skip this work when the
+            # divergence threshold is infinite (the default).
             state_scale = float(np.max(np.abs(self.state)))
             if state_scale == 0.0:
                 diverged = False
@@ -290,7 +290,6 @@ class LorenzEnvEuler:
         if self.regularized:
             control_cost = self.alpha * (u / self.u_ref) ** 2 / self.horizon
         reward = -float(state_cost + control_cost)
-        #Here is the  REWARD FUNCITON
         done = diverged
         info: Dict[str, bool] = {}
         if diverged:
@@ -305,18 +304,11 @@ class LorenzEnvEuler:
     @staticmethod
     def _euler_step(state: np.ndarray, u: float) -> np.ndarray:
         # Euler integration simulates the controlled Lorenz dynamics.
-        # Note: replace with RK4 later
         x, y, z = state
         dx = PRANDTL * (y - x) + u
         dy = x * (RAYLEIGH - z) - y
         dz = x * y - B * z
         return state + np.array([dx, dy, dz]) * DT
-
-    def render(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
 
 
 class StateDiscretizer:
@@ -373,10 +365,6 @@ class StateDiscretizer:
         indices = np.clip(indices, 0, np.asarray(self.bins) - 1)
         return cast(Tuple[int, int, int], tuple(int(index) for index in indices))
 
-    def flat_index(self, state: Sequence[float]) -> int:
-        """Return the equivalent flattened state index."""
-        return int(np.ravel_multi_index(self.discretize(state), self.bins))
-
 
 class QLearningAgent:
     """A reproducible tabular Q-learning agent for discrete controls."""
@@ -384,20 +372,16 @@ class QLearningAgent:
     def __init__(
         self,
         n_actions: int,
-        learning_rate: Optional[float] = None,
-        discount_factor: Optional[float] = None,
+        learning_rate: float = 0.1,
+        discount_factor: float = 1.0,
         epsilon: float = 1.0,
         epsilon_decay: float = 0.995,
         epsilon_min: float = 0.05,
         state_bins: Union[int, Sequence[int]] = 15,
         state_bounds: Sequence[Tuple[float, float]] = DEFAULT_STATE_BOUNDS,
         random_seed: Optional[int] = None,
-        *,
-        alpha_q: Optional[float] = None,
-        gamma: Optional[float] = None,
-        seed: Optional[int] = None,
     ):
-        """Create an agent; ``alpha_q`` and ``gamma`` are supported aliases."""
+        """Create a tabular Q-learning agent."""
         if not isinstance(n_actions, (int, np.integer)) or isinstance(
             n_actions, (bool, np.bool_)
         ):
@@ -405,12 +389,8 @@ class QLearningAgent:
         if n_actions < 1:
             raise ValueError("n_actions must be at least 1")
 
-        self.learning_rate = self._resolve_alias(
-            learning_rate, alpha_q, 0.1, "learning_rate", "alpha_q"
-        )
-        self.discount_factor = self._resolve_alias(
-            discount_factor, gamma, 1.0, "discount_factor", "gamma"
-        )
+        self.learning_rate = float(learning_rate)
+        self.discount_factor = float(discount_factor)
         if (
             not np.isfinite(self.learning_rate)
             or not 0.0 < self.learning_rate <= 1.0
@@ -428,36 +408,15 @@ class QLearningAgent:
             raise ValueError("require 0 <= epsilon_min <= epsilon <= 1")
         if not 0.0 < epsilon_decay <= 1.0:
             raise ValueError("epsilon_decay must be in (0, 1]")
-        if random_seed is not None and seed is not None and random_seed != seed:
-            raise ValueError("random_seed and seed must match when both are supplied")
-
         self.n_actions = int(n_actions)
         self.epsilon = float(epsilon)
         self.epsilon_decay = float(epsilon_decay)
         self.epsilon_min = float(epsilon_min)
-        self.alpha_q = self.learning_rate
-        self.gamma = self.discount_factor
         self.discretizer = StateDiscretizer(state_bins, state_bounds)
-        self.rng = np.random.default_rng(seed if seed is not None else random_seed)
+        self.rng = np.random.default_rng(random_seed)
         self.q_table = np.zeros(
             self.discretizer.bins + (self.n_actions,), dtype=np.float64
         )
-
-    @staticmethod
-    def _resolve_alias(
-        primary: Optional[float],
-        alias: Optional[float],
-        default: float,
-        primary_name: str,
-        alias_name: str,
-    ) -> float:
-        if primary is not None and alias is not None and not np.isclose(primary, alias):
-            raise ValueError(f"{primary_name} and {alias_name} must match")
-        if primary is not None:
-            return float(primary)
-        if alias is not None:
-            return float(alias)
-        return default
 
     def discretize_state(self, state: Sequence[float]) -> Tuple[int, int, int]:
         """Map a continuous Lorenz state to the agent's state-bin tuple."""
