@@ -44,17 +44,19 @@ class ExperimentDefaults:
 
     # Episode settings
     episodes: int = 600
-    eval_episodes: int = 1
+    eval_episodes: int = 5
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
 
     # Initial state and optional exploration reproducibility
     ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
     exploration_seed: Optional[int] = None
+    evaluation_seed: Optional[int] = 0
+    evaluation_ic_perturbation: float = 0.01
 
     # Simulation duration
-    training_lyapunov_times: float = 2.0
-    evaluation_lyapunov_times: float = 20.0
+    training_lyapunov_times: float = 10.0
+    evaluation_lyapunov_times: float = 50.0
 
     # Control settings
     control_cost: float = LAMBDA
@@ -64,13 +66,13 @@ class ExperimentDefaults:
     action_bins: int = 9
 
     # State discretization
-    state_bins: Tuple[int, int, int] = (15, 15, 15)
+    state_bins: Tuple[int, int, int] = (30, 30, 30)
 
     # Q-learning hyperparameters
     learning_rate: float = 0.01
     discount_factor: float = 1.0
     epsilon: float = 0.99
-    epsilon_decay: float = 0.05
+    epsilon_decay: float = 0.5
     epsilon_min: float = 0.05
 
 EXPERIMENT_DEFAULTS = ExperimentDefaults()
