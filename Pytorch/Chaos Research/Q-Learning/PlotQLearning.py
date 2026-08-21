@@ -318,10 +318,16 @@ def plot_evaluation_diagnostics(
             or trajectory.shape[0] == 0
         ):
             raise ValueError("Each evaluation trajectory must have shape (n, 3)")
-    initial_condition_label = np.array2string(
+    reference_condition_label = np.array2string(
         trajectory_arrays[0][0],
         precision=3,
         separator=", ",
+    )
+    initial_states = np.asarray(
+        [trajectory[0] for trajectory in trajectory_arrays], dtype=np.float64
+    )
+    has_perturbed_initial_states = bool(
+        np.any(~np.isclose(initial_states, initial_states[0], rtol=0.0, atol=0.0))
     )
 
     control_arrays = [np.asarray(values, dtype=np.float64) for values in controls]
@@ -444,10 +450,17 @@ def plot_evaluation_diagnostics(
     trajectory_axis.set_xlabel("x")
     trajectory_axis.set_ylabel("y")
     trajectory_axis.set_zlabel("z")
-    trajectory_axis.set_title(
-        f"Evaluation trajectory from fixed initial condition "
-        f"{initial_condition_label}"
-    )
+    if has_perturbed_initial_states:
+        trajectory_title = (
+            "Evaluation trajectories near reference initial condition "
+            f"{reference_condition_label}"
+        )
+    else:
+        trajectory_title = (
+            "Evaluation trajectory from fixed initial condition "
+            f"{reference_condition_label}"
+        )
+    trajectory_axis.set_title(trajectory_title)
     if label_trials:
         trajectory_axis.legend(title="Evaluation trial")
     _finish_figure(
@@ -463,9 +476,14 @@ def plot_evaluation_diagnostics(
         figsize=(14, 10),
         sharex=True,
     )
+    initial_state_description = (
+        "perturbed initial conditions"
+        if has_perturbed_initial_states
+        else "a fixed initial condition"
+    )
     state_figure.suptitle(
-        f"State response from fixed initial condition {initial_condition_label}\n"
-        "Greedy Q-table evaluation with no initial-state perturbation"
+        f"State responses near reference initial condition {reference_condition_label}\n"
+        f"Greedy Q-table evaluation with {initial_state_description}"
     )
     for coordinate, (state_axis, coordinate_label) in enumerate(
         zip(state_axes, ("x", "y", "z"))
