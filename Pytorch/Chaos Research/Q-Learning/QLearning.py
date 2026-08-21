@@ -601,11 +601,13 @@ def control_q_learning(
     num_episodes: int,
     max_steps: Optional[int] = None,
     x0: Optional[np.ndarray] = None,
+    initial_states: Optional[Sequence[Sequence[float]]] = None,
 ) -> EvaluationResults:
     """Evaluate greedily without exploration or Q-table updates.
 
-    Each trajectory includes its initial state.  ``actions`` contains discrete
-    action indices; ``control_values`` contains their corresponding controls.
+    Each trajectory includes its initial state. ``initial_states`` may provide
+    one distinct start per episode. ``actions`` contains discrete action
+    indices; ``control_values`` contains their corresponding controls.
     """
     _validate_discrete_pair(env, agent)
     if not isinstance(num_episodes, (int, np.integer)) or isinstance(
@@ -614,6 +616,15 @@ def control_q_learning(
         raise TypeError("num_episodes must be an integer")
     if num_episodes < 1:
         raise ValueError("num_episodes must be at least 1")
+    if x0 is not None and initial_states is not None:
+        raise ValueError("provide either x0 or initial_states, not both")
+    episode_initial_states: Optional[np.ndarray] = None
+    if initial_states is not None:
+        episode_initial_states = np.asarray(initial_states, dtype=np.float64)
+        if episode_initial_states.shape != (num_episodes, 3):
+            raise ValueError("initial_states must have shape (num_episodes, 3)")
+        if not np.isfinite(episode_initial_states).all():
+            raise ValueError("initial_states must contain only finite values")
     if max_steps is not None:
         if not isinstance(max_steps, (int, np.integer)) or isinstance(
             max_steps, (bool, np.bool_)
@@ -632,8 +643,13 @@ def control_q_learning(
     control_efforts: List[float] = []
     objectives: List[float] = []
 
-    for _ in range(num_episodes):
-        state = env.reset(x0=x0)
+    for episode_index in range(num_episodes):
+        episode_x0 = (
+            episode_initial_states[episode_index]
+            if episode_initial_states is not None
+            else x0
+        )
+        state = env.reset(x0=episode_x0)
         states = [state.copy()]
         actions: List[int] = []
         controls: List[float] = []
