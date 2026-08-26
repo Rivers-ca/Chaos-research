@@ -51,7 +51,17 @@ def _load_qlearning(path: str | Path = QLEARNING_PATH) -> ModuleType:
 
 
 qlearning = _load_qlearning()
+<<<<<<< HEAD
+=======
+LorenzEnvEuler = qlearning.LorenzEnvEuler
+QLearningAgent = qlearning.QLearningAgent
+train_q_learning = qlearning.train_q_learning
+evaluate_q_learning = qlearning.evaluate_q_learning
+train_q_learning_with_evaluation = qlearning.train_q_learning_with_evaluation
+>>>>>>> origin/main
 steps_to_lyapunov_times = qlearning.steps_to_lyapunov_times
+make_evaluation_initial_states = qlearning.make_evaluation_initial_states
+make_random_initial_state_sampler = qlearning.make_random_initial_state_sampler
 
 
 def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
@@ -672,12 +682,106 @@ def plot_q_table_diagnostics(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+<<<<<<< HEAD
         "--run-data",
         type=Path,
         default=qlearning.RUN_OUTPUT_PATH,
         help="Data file produced by RunQLearning.py",
     )
     parser.add_argument(
+=======
+        "--eval-every",
+        type=int,
+        default=defaults.evaluation_interval,
+        help="Run greedy evaluation after this many training episodes",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=defaults.max_steps,
+        help="Optional training-step cap per episode",
+    )
+    parser.add_argument(
+        "--eval-max-steps",
+        type=int,
+        default=defaults.eval_max_steps,
+        help="Optional evaluation-step cap; defaults to the full evaluation horizon",
+    )
+    parser.add_argument(
+        "--initial-condition",
+        type=float,
+        nargs=3,
+        default=list(defaults.ic),
+        metavar=("X0", "Y0", "Z0"),
+        help="reference Lorenz initial condition",
+    )
+    parser.add_argument(
+        "--exploration-seed",
+        type=int,
+        default=defaults.exploration_seed,
+        help="optional seed for epsilon-greedy exploration only",
+    )
+    parser.add_argument(
+        "--training-ic-seed",
+        type=int,
+        default=defaults.training_ic_seed,
+        help="seed for training initial-condition perturbations",
+    )
+    parser.add_argument(
+        "--training-ic-perturbation",
+        type=float,
+        default=defaults.training_ic_perturbation,
+        help="maximum per-coordinate perturbation for every training trial",
+    )
+    parser.add_argument(
+        "--evaluation-seed",
+        type=int,
+        default=defaults.evaluation_seed,
+        help="seed for evaluation initial-condition perturbations",
+    )
+    parser.add_argument(
+        "--eval-ic-perturbation",
+        type=float,
+        default=defaults.evaluation_ic_perturbation,
+        help="maximum per-coordinate perturbation after evaluation Trial 1",
+    )
+    parser.add_argument(
+        "--lyapunov-times",
+        type=float,
+        default=defaults.training_lyapunov_times,
+        help="Training episode length in Lyapunov times",
+    )
+    parser.add_argument(
+        "--eval-lyapunov-times",
+        type=float,
+        default=defaults.evaluation_lyapunov_times,
+        help="Evaluation episode length in Lyapunov times",
+    )
+    parser.add_argument("--control-cost", type=float, default=defaults.control_cost)
+    parser.add_argument(
+        "--regularized",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.regularized,
+        help="include normalized control effort in the objective",
+    )
+    parser.add_argument("--action-low", type=float, default=defaults.action_low)
+    parser.add_argument("--action-high", type=float, default=defaults.action_high)
+    parser.add_argument("--action-bins", type=int, default=defaults.action_bins)
+    parser.add_argument(
+        "--state-bins",
+        type=int,
+        nargs="+",
+        default=list(defaults.state_bins),
+    )
+    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
+    parser.add_argument(
+        "--discount-factor", type=float, default=defaults.discount_factor
+    )
+    parser.add_argument("--epsilon", type=float, default=defaults.epsilon)
+    parser.add_argument("--epsilon-decay", type=float, default=defaults.epsilon_decay)
+    parser.add_argument("--epsilon-min", type=float, default=defaults.epsilon_min)
+    parser.add_argument(
+>>>>>>> origin/main
         "--output-dir",
         type=Path,
         default=Path(__file__).with_name("q_learning_plots"),
@@ -696,12 +800,58 @@ def main() -> None:
     args = parser.parse_args()
     if args.dpi < 1:
         parser.error("--dpi must be at least 1")
+<<<<<<< HEAD
     try:
         run = qlearning.load_q_learning_run(args.run_data)
     except FileNotFoundError:
         parser.error(
             f"run data not found: {args.run_data}; run RunQLearning.py first"
         )
+=======
+    if args.episodes < 1:
+        parser.error("--episodes must be at least 1")
+    if args.eval_episodes < 1:
+        parser.error("--eval-episodes must be at least 1")
+    if args.eval_every < 1:
+        parser.error("--eval-every must be at least 1")
+    if args.max_steps is not None and args.max_steps < 1:
+        parser.error("--max-steps must be at least 1")
+    if args.eval_max_steps is not None and args.eval_max_steps < 1:
+        parser.error("--eval-max-steps must be at least 1")
+    if not np.isfinite(args.lyapunov_times) or args.lyapunov_times <= 0.0:
+        parser.error("--lyapunov-times must be positive")
+    if (
+        not np.isfinite(args.eval_lyapunov_times)
+        or args.eval_lyapunov_times <= 0.0
+    ):
+        parser.error("--eval-lyapunov-times must be positive")
+    if not np.isfinite(args.eval_ic_perturbation) or args.eval_ic_perturbation < 0.0:
+        parser.error("--eval-ic-perturbation must be finite and nonnegative")
+    if (
+        not np.isfinite(args.training_ic_perturbation)
+        or args.training_ic_perturbation < 0.0
+    ):
+        parser.error("--training-ic-perturbation must be finite and nonnegative")
+    if not np.isfinite(args.control_cost) or args.control_cost < 0.0:
+        parser.error("--control-cost must be nonnegative")
+    if args.action_bins < 1:
+        parser.error("--action-bins must be at least 1")
+    if not np.isfinite([args.action_low, args.action_high]).all():
+        parser.error("--action-low and --action-high must be finite")
+    if args.action_low >= args.action_high:
+        parser.error("--action-low must be below --action-high")
+    if not 0.0 < args.learning_rate <= 1.0:
+        parser.error("--learning-rate must be in (0, 1]")
+    if not 0.0 <= args.discount_factor <= 1.0:
+        parser.error("--discount-factor must be in [0, 1]")
+    if not 0.0 <= args.epsilon_min <= args.epsilon <= 1.0:
+        parser.error("require 0 <= --epsilon-min <= --epsilon <= 1")
+    if not 0.0 < args.epsilon_decay <= 1.0:
+        parser.error("--epsilon-decay must be in (0, 1]")
+    reference_state = np.asarray(args.initial_condition, dtype=np.float64)
+    if reference_state.shape != (3,) or not np.isfinite(reference_state).all():
+        parser.error("--initial-condition must contain three finite values")
+>>>>>>> origin/main
 
     required = {
         "history", "checkpoints", "evaluation", "uncontrolled_trajectory",
@@ -711,10 +861,86 @@ def main() -> None:
     if missing:
         parser.error(f"run data is missing: {', '.join(sorted(missing))}")
 
+<<<<<<< HEAD
     history = run["history"]
     checkpoint_history = run["checkpoints"]
     evaluation = run["evaluation"]
     uncontrolled_trajectory = np.asarray(run["uncontrolled_trajectory"])
+=======
+    randomized_training_state = make_random_initial_state_sampler(
+        reference_state, args.training_ic_perturbation, args.training_ic_seed
+    )
+
+    training_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.lyapunov_times,
+        action_type="discrete",
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=randomized_training_state,
+        regularized=args.regularized,
+        u_ref=qlearning.U_REF,
+    )
+    agent = QLearningAgent(
+        n_actions=len(training_env.actions),
+        learning_rate=args.learning_rate,
+        discount_factor=args.discount_factor,
+        epsilon=args.epsilon,
+        epsilon_decay=args.epsilon_decay,
+        epsilon_min=args.epsilon_min,
+        state_bins=state_bins,
+        random_seed=args.exploration_seed,
+    )
+
+    evaluation_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.eval_lyapunov_times,
+        action_type="discrete",
+        action_bounds=(args.action_low, args.action_high),
+        n_action_bins=args.action_bins,
+        ic_dist=fixed_initial_state,
+        regularized=args.regularized,
+        u_ref=qlearning.U_REF,
+    )
+    evaluation_initial_states = make_evaluation_initial_states(
+        reference_state,
+        args.eval_episodes,
+        args.eval_ic_perturbation,
+        args.evaluation_seed,
+    )
+    history, checkpoint_history, evaluation = train_q_learning_with_evaluation(
+        training_env,
+        evaluation_env,
+        agent,
+        args.episodes,
+        args.eval_every,
+        args.eval_episodes,
+        max_steps=args.max_steps,
+        evaluation_max_steps=args.eval_max_steps,
+        evaluation_initial_states=evaluation_initial_states,
+    )
+
+    controlled_trajectories = evaluation["trajectories"]
+    if len(controlled_trajectories) == 0:
+        raise RuntimeError("Evaluation returned no trajectory for baseline comparison")
+    baseline_initial_state = np.asarray(
+        controlled_trajectories[0][0],
+        dtype=np.float64,
+    )
+    uncontrolled_env = LorenzEnvEuler(
+        alpha=args.control_cost,
+        lyapunov_times=args.eval_lyapunov_times,
+        action_type="continuous",
+        action_bounds=(-qlearning.U_REF, qlearning.U_REF),
+        regularized=False,
+        u_ref=qlearning.U_REF,
+    )
+    uncontrolled_trajectory = evaluate_uncontrolled_lorenz(
+        uncontrolled_env,
+        baseline_initial_state.tolist(),
+        args.eval_max_steps,
+    )
+>>>>>>> origin/main
 
     output_dir = None if args.no_save else args.output_dir.expanduser().resolve()
     plot_training_diagnostics(
