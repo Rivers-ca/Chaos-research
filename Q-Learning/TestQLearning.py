@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import dataclasses
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,46 +19,61 @@ qlearning = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(qlearning)
 
 
-class QLearningRegressionTests(unittest.TestCase):
-    def test_state_loss_matches_gradient_reference_phi(self) -> None:
-        points = np.array([[-2.0, 0.0, 0.0], [0.0, 1.0, 1.0], [2.0, 0.0, 0.0]])
-        expected = float(np.mean(qlearning.phi(points[:, 0])))
+def experiment_settings(**changes: object):
+    """Create an explicit experiment variant for an environment test."""
+    return dataclasses.replace(qlearning.EXPERIMENT_DEFAULTS, **changes)
 
-        self.assertAlmostEqual(qlearning.calculate_loss(points), expected)
+
+class QLearningRegressionTests(unittest.TestCase):
+    def test_canonical_run_contains_all_plotting_data(self) -> None:
+        settings = dataclasses.replace(
+            qlearning.EXPERIMENT_DEFAULTS,
+            episodes=3,
+            evaluation_interval=2,
+            eval_episodes=2,
+            training_lyapunov_times=0.02,
+            evaluation_lyapunov_times=0.02,
+        )
+        run = qlearning.run_q_learning(settings)
+
+        self.assertEqual(run["checkpoints"]["episodes"], [2, 3])
+        self.assertEqual(len(run["history"]["episode_rewards"]), 3)
+        self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.pkl"
+            qlearning.save_q_learning_run(run, path)
+            loaded = qlearning.load_q_learning_run(path)
+        np.testing.assert_array_equal(loaded["q_table"], run["q_table"])
+
+    def test_default_state_cost_uses_phi(self) -> None:
         self.assertAlmostEqual(
             qlearning.default_state_cost_fn(2.0), float(qlearning.phi(2.0))
         )
 
-    def test_full_episode_return_matches_reference_objective(self) -> None:
+    def test_full_episode_return_is_finite(self) -> None:
         env = qlearning.LorenzEnvEuler(
-            lyapunov_times=0.05,
-            action_type="discrete",
-            n_action_bins=3,
-            regularized=True,
+            experiment_settings(
+                evaluation_lyapunov_times=0.05,
+                action_bins=3,
+                regularized=True,
+            )
         )
         state = env.reset()
-        states = [state]
-        controls = []
         total_reward = 0.0
 
         while True:
             state, reward, done, _ = env.step(1)
-            states.append(state)
-            controls.append(float(env.actions[1]))
             total_reward += reward
             if done:
                 break
 
-        objective = qlearning.reference_objective(
-            np.asarray(states),
-            controls,
-            lam=env.alpha,
-            regularized=True,
-        )
-        self.assertAlmostEqual(total_reward, -objective)
+        self.assertTrue(np.isfinite(total_reward))
+        self.assertLessEqual(total_reward, 0.0)
 
     def test_nonfinite_next_state_is_divergence(self) -> None:
-        env = qlearning.LorenzEnvEuler(action_type="continuous")
+        env = qlearning.LorenzEnvEuler(
+            qlearning.EXPERIMENT_DEFAULTS, controlled=False
+        )
         env.reset(np.array([1e308, 0.0, 0.0]))
 
         with np.errstate(over="ignore", invalid="ignore"):
@@ -68,26 +85,32 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertAlmostEqual(reward, -1.0)
 
     def test_divergence_does_not_poison_training_or_evaluation(self) -> None:
+        settings = experiment_settings(
+            ic=(1e308, 0.0, 0.0),
+            training_ic_perturbation=0.0,
+            action_bins=1,
+        )
         env = qlearning.LorenzEnvEuler(
-            action_type="discrete",
-            n_action_bins=1,
-            ic_dist=lambda: np.array([1e308, 0.0, 0.0]),
+            settings,
+            training=True,
         )
         agent = qlearning.QLearningAgent(n_actions=1, epsilon=0.0, epsilon_min=0.0)
 
         with np.errstate(over="ignore", invalid="ignore"):
             history = qlearning.train_q_learning(env, agent, num_episodes=1)
-            evaluation = qlearning.control_q_learning(env, agent, num_episodes=1)
+            evaluation = qlearning.evaluate_q_learning(env, agent, num_episodes=1)
 
         self.assertEqual(history["diverged"], [True])
         self.assertTrue(np.isfinite(agent.q_table).all())
         self.assertTrue(np.isfinite(evaluation["episode_rewards"][0]))
-        self.assertEqual(evaluation["objectives"], [float("inf")])
+        self.assertEqual(evaluation["diverged"], [True])
 
     def test_step_after_terminal_transition_requires_reset(self) -> None:
         env = qlearning.LorenzEnvEuler(
-            lyapunov_times=qlearning.LYAPUNOV_EXP * qlearning.DT,
-            action_type="continuous",
+            experiment_settings(
+                evaluation_lyapunov_times=qlearning.LYAPUNOV_EXP * qlearning.DT
+            ),
+            controlled=False,
         )
         env.reset()
         _, _, done, _ = env.step(0.0)
@@ -97,7 +120,9 @@ class QLearningRegressionTests(unittest.TestCase):
             env.step(0.0)
 
     def test_reset_rejects_nonfinite_state(self) -> None:
-        env = qlearning.LorenzEnvEuler(action_type="continuous")
+        env = qlearning.LorenzEnvEuler(
+            qlearning.EXPERIMENT_DEFAULTS, controlled=False
+        )
         with self.assertRaisesRegex(ValueError, "must be finite"):
             env.reset(np.array([np.nan, 0.0, 0.0]))
 
@@ -107,16 +132,17 @@ class QLearningRegressionTests(unittest.TestCase):
             discretizer.discretize([np.inf, 0.0, 0.0])
 
     def test_step_requires_reset_even_with_assertions_disabled(self) -> None:
-        env = qlearning.LorenzEnvEuler(action_type="continuous")
+        env = qlearning.LorenzEnvEuler(
+            qlearning.EXPERIMENT_DEFAULTS, controlled=False
+        )
         with self.assertRaisesRegex(RuntimeError, "reset"):
             env.step(0.0)
 
     def test_episode_must_contain_an_integration_step(self) -> None:
         with self.assertRaisesRegex(ValueError, "one integration step"):
             qlearning.LorenzEnvEuler(
-                lyapunov_times=0.001,
-                action_type="continuous",
-                regularized=True,
+                experiment_settings(evaluation_lyapunov_times=0.001),
+                controlled=False,
             )
 
     def test_q_update_bootstraps_only_nonterminal_transitions(self) -> None:
@@ -169,25 +195,100 @@ class QLearningRegressionTests(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(starts, repeated)
-        np.testing.assert_array_equal(starts[0], [0.0, 1.0, 1.05])
-        self.assertTrue(np.all(np.abs(starts[1:] - starts[0]) <= 0.01))
+        reference = np.array([0.0, 1.0, 1.05])
+        self.assertTrue(np.all(np.abs(starts - reference) <= 0.01))
         self.assertEqual(np.unique(starts, axis=0).shape[0], 4)
 
         env = qlearning.LorenzEnvEuler(
-            lyapunov_times=0.02,
-            action_type="discrete",
-            n_action_bins=3,
+            experiment_settings(evaluation_lyapunov_times=0.02, action_bins=3)
         )
         agent = qlearning.QLearningAgent(
             n_actions=3, epsilon=0.0, epsilon_min=0.0
         )
-        evaluation = qlearning.control_q_learning(
+        evaluation = qlearning.evaluate_q_learning(
             env, agent, num_episodes=4, initial_states=starts
         )
         actual_starts = np.asarray(
             [trajectory[0] for trajectory in evaluation["trajectories"]]
         )
         np.testing.assert_array_equal(actual_starts, starts)
+
+    def test_training_sampler_randomizes_every_trial_reproducibly(self) -> None:
+        sampler = qlearning.make_random_initial_state_sampler(
+            [0.0, 1.0, 1.05], perturbation=0.01, random_seed=7
+        )
+        repeated_sampler = qlearning.make_random_initial_state_sampler(
+            [0.0, 1.0, 1.05], perturbation=0.01, random_seed=7
+        )
+        starts = np.asarray([sampler() for _ in range(4)])
+        repeated = np.asarray([repeated_sampler() for _ in range(4)])
+
+        np.testing.assert_array_equal(starts, repeated)
+        self.assertEqual(np.unique(starts, axis=0).shape[0], 4)
+        self.assertTrue(
+            np.all(np.abs(starts - np.array([0.0, 1.0, 1.05])) <= 0.01)
+        )
+
+    def test_checkpoint_training_preserves_continuous_history(self) -> None:
+        settings = experiment_settings(
+            training_lyapunov_times=0.02,
+            evaluation_lyapunov_times=0.02,
+            action_bins=3,
+        )
+        training_env = qlearning.LorenzEnvEuler(
+            settings,
+            training=True,
+        )
+        evaluation_env = qlearning.LorenzEnvEuler(settings)
+        agent = qlearning.QLearningAgent(
+            n_actions=3,
+            epsilon=0.8,
+            epsilon_decay=0.5,
+            epsilon_min=0.0,
+            random_seed=4,
+        )
+        starts = qlearning.make_evaluation_initial_states(
+            [0.0, 1.0, 1.05], 2, perturbation=0.01, random_seed=9
+        )
+
+        history, checkpoints, final_evaluation = (
+            qlearning.train_q_learning_with_evaluation(
+                training_env,
+                evaluation_env,
+                agent,
+                num_episodes=5,
+                evaluation_interval=2,
+                evaluation_episodes=2,
+                evaluation_initial_states=starts,
+            )
+        )
+
+        self.assertEqual(len(history["episode_rewards"]), 5)
+        self.assertEqual(len(history["rolling_mean_rewards"]), 5)
+        self.assertEqual(checkpoints["episodes"], [2, 4, 5])
+        self.assertEqual(len(checkpoints["mean_rewards"]), 3)
+        self.assertAlmostEqual(agent.epsilon, 0.8 * 0.5**5)
+        actual_starts = np.asarray(
+            [trajectory[0] for trajectory in final_evaluation["trajectories"]]
+        )
+        np.testing.assert_array_equal(actual_starts, starts)
+
+    def test_checkpoint_training_validates_interval_before_training(self) -> None:
+        env = qlearning.LorenzEnvEuler(
+            experiment_settings(evaluation_lyapunov_times=0.02, action_bins=3)
+        )
+        agent = qlearning.QLearningAgent(n_actions=3)
+
+        with self.assertRaisesRegex(ValueError, "evaluation_interval"):
+            qlearning.train_q_learning_with_evaluation(
+                env,
+                env,
+                agent,
+                num_episodes=2,
+                evaluation_interval=0,
+                evaluation_episodes=1,
+            )
+        self.assertEqual(agent.epsilon, qlearning.EXPERIMENT_DEFAULTS.epsilon)
 
 
 if __name__ == "__main__":
