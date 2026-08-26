@@ -10,11 +10,6 @@ env/
 # Environment / secrets
 .env
 
-# JavaScript dependencies and generated output
-node_modules/
-dist/
-.vite/
-
 # Data & model artifacts
 *.npy
 *.npz
@@ -32,18 +27,11 @@ wandb/
 lightning_logs/
 mlruns/
 events.out.tfevents.*
-qlearning_results_*/
-
-# Documentation - keep only essential setup files
-**/*.md
-!**/ENVIRONMENT_SETUP.md
-!**/README.md
-
-# Tests
-tests/
-test/
 
 # OS / editor
 .DS_Store
 .vscode/
 .idea/
+
+# Keep local research papers out of GitHub
+/Relevant Papers*/
