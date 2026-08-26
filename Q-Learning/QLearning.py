@@ -1,6 +1,3 @@
-"""Controlled Lorenz environment and a tabular Q-learning workflow."""
-
-import argparse
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, TypedDict, cast
 
@@ -11,10 +8,16 @@ class TrainingHistory(TypedDict):
     diverged: List[bool]
     rolling_mean_rewards: List[float]
 
+
+class CheckpointEvaluationHistory(TypedDict):
+    episodes: List[int]
+    mean_rewards: List[float]
+    reward_standard_deviations: List[float]
+    divergence_rates: List[float]
+    mean_control_efforts: List[float]
+
 import numpy as np
 
-
-"""Patrick's parameters for the Lorenz system."""
 RAYLEIGH = 28
 PRANDTL = 10
 B = 8 / 3
@@ -23,6 +26,8 @@ LYAPUNOV_EXP = 0.9056
 EPS = 2.0
 U_REF = 60.0
 LAMBDA = 0.007
+EPISODES = 600
+PRINT_EVERY = 25
 
 INITIAL_STATE = np.array([0.0, 1.0, 1.05], dtype=np.float64)
 
@@ -35,27 +40,27 @@ DEFAULT_STATE_BOUNDS: Tuple[Tuple[float, float], ...] = (
 
 @dataclass(frozen=True)
 class ExperimentDefaults:
-    """Shared runnable experiment settings used by both Q-learning scripts.
-
-    Edit this block when changing experiment parameters.  ``QLearning.py`` and
-    ``PlotQLearning.py`` both read the same values, while command-line options
-    can still override them for a single run.
+    """Update these defaults to change the behavior of the main() function and the default training/evaluation settings, 
+    this will also be refle
     """
 
     # Episode settings
-    episodes: int = 600
+    episodes: int = EPISODES
     eval_episodes: int = 5
+    evaluation_interval: int = 50
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
 
     # Initial state and optional exploration reproducibility
     ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
+    training_ic_seed: Optional[int] = 0
+    training_ic_perturbation: float = 0.01
     exploration_seed: Optional[int] = None
     evaluation_seed: Optional[int] = 0
     evaluation_ic_perturbation: float = 0.01
 
     # Simulation duration
-    training_lyapunov_times: float = 10.0
+    training_lyapunov_times: float = 50.0
     evaluation_lyapunov_times: float = 50.0
 
     # Control settings
@@ -66,25 +71,23 @@ class ExperimentDefaults:
     action_bins: int = 9
 
     # State discretization
-    state_bins: Tuple[int, int, int] = (30, 30, 30)
+    state_bins: Tuple[int, int, int] = (15, 15, 15)
 
     # Q-learning hyperparameters
     learning_rate: float = 0.01
     discount_factor: float = 1.0
     epsilon: float = 0.99
-    epsilon_decay: float = 0.5
+    epsilon_decay: float = 0.01
     epsilon_min: float = 0.05
 
 EXPERIMENT_DEFAULTS = ExperimentDefaults()
 
 
 def lyapunov_times_to_steps(lyapunov_times: float) -> int:
-    """Convert a duration in Lyapunov times to Patrick's step convention."""
     return round(lyapunov_times / (LYAPUNOV_EXP * DT))
 
 
 def steps_to_lyapunov_times(steps: int) -> float:
-    """Convert a step count to a duration in Lyapunov times."""
     return steps * LYAPUNOV_EXP * DT
 
 
@@ -94,12 +97,6 @@ def make_evaluation_initial_states(
     perturbation: float = 0.01,
     random_seed: Optional[int] = 0,
 ) -> np.ndarray:
-    """Create reproducible evaluation starts around a reference state.
-
-    Trial 1 uses the exact reference state. Each later trial receives an
-    independent uniform perturbation in ``[-perturbation, perturbation]`` for
-    each coordinate.
-    """
     reference = np.asarray(reference_state, dtype=np.float64)
     if reference.shape != (3,) or not np.isfinite(reference).all():
         raise ValueError("reference_state must contain three finite values")
@@ -113,34 +110,44 @@ def make_evaluation_initial_states(
         raise ValueError("perturbation must be finite and nonnegative")
 
     starts = np.repeat(reference[None, :], int(num_episodes), axis=0)
-    if num_episodes > 1 and perturbation > 0.0:
+    if perturbation > 0.0:
         rng = np.random.default_rng(random_seed)
-        starts[1:] += rng.uniform(
+        starts += rng.uniform(
             -perturbation,
             perturbation,
-            size=(num_episodes - 1, 3),
+            size=(num_episodes, 3),
         )
     return starts
 
+#Check back on this later
+def make_random_initial_state_sampler(
+    reference_state: Sequence[float],
+    perturbation: float = 0.01,
+    random_seed: Optional[int] = None,
+) -> Callable[[], np.ndarray]:
+    """Return a callable that draws a new perturbed state for every reset."""
+    reference = np.asarray(reference_state, dtype=np.float64)
+    if reference.shape != (3,) or not np.isfinite(reference).all():
+        raise ValueError("reference_state must contain three finite values")
+    if not np.isfinite(perturbation) or perturbation < 0.0:
+        raise ValueError("perturbation must be finite and nonnegative")
+    rng = np.random.default_rng(random_seed)
+
+    def sample() -> np.ndarray:
+        return reference + rng.uniform(-perturbation, perturbation, size=3)
+
+    return sample
+
 
 def phi(x: Union[float, np.ndarray], eps: float = EPS) -> Union[float, np.ndarray]:
-    """Smooth indicator used by the gradient-based reference objective."""
     return 0.5 * (1.0 + np.tanh(x / eps))
 
 
 def default_state_cost_fn(x: float) -> float:
-    """Typed default state cost function for the environment."""
     return float(phi(float(x)))
 
 
-def calculate_loss(points: np.ndarray, eps: float = EPS) -> float:
-    """Reference state loss: the trajectory mean of ``phi(x)``."""
-    trajectory = np.asarray(points, dtype=np.float64)
-    if trajectory.ndim != 2 or trajectory.shape[1] != 3 or trajectory.shape[0] < 1:
-        raise ValueError("points must have nonempty shape (n, 3)")
-    return float(np.mean(phi(trajectory[:, 0], eps)))
-
-
+#check back on this later
 def control_effort(control_values: Sequence[float], u_ref: float = U_REF) -> float:
     """Reference normalized mean-square control effort."""
     if u_ref <= 0.0:
@@ -153,22 +160,7 @@ def control_effort(control_values: Sequence[float], u_ref: float = U_REF) -> flo
     return float(np.mean((controls / u_ref) ** 2))
 
 
-def reference_objective(
-    points: np.ndarray,
-    control_values: Sequence[float],
-    lam: float = LAMBDA,
-    regularized: bool = False,
-) -> float:
-    """Evaluate the same objective minimized by ``optimize_gradient``."""
-    task = calculate_loss(points)
-    if not regularized:
-        return task
-    return task + lam * control_effort(control_values)
-
-
 class LorenzEnvEuler:
-    """Controlled Lorenz system simulated with forward Euler integration."""
-
     def __init__(
         self,
         alpha: float = LAMBDA,
@@ -182,19 +174,6 @@ class LorenzEnvEuler:
         regularized: bool = False,
         u_ref: float = U_REF,
     ):
-        """
-        Args:
-            alpha: Control-cost weight corresponding to ``LAMBDA``.
-            lyapunov_times: Episode length in Lyapunov times.
-            action_type: ``"continuous"`` or ``"discrete"``.
-            action_bounds: Inclusive ``(low, high)`` bounds for the control.
-            n_action_bins: Number of controls when actions are discrete.
-            ic_dist: Callable returning ``[x0, y0, z0]``.
-            state_cost_fn: Callable mapping x to its state cost.
-            divergence_threshold: End an episode above this state norm.
-            regularized: Include the reference control-effort penalty.
-            u_ref: Control normalization corresponding to ``U_REF``.
-        """
         if not np.isfinite(alpha) or alpha < 0.0:
             raise ValueError("alpha must be finite and nonnegative")
         if not np.isfinite(lyapunov_times) or lyapunov_times <= 0.0:
@@ -241,8 +220,6 @@ class LorenzEnvEuler:
             raise ValueError("the lower action bound must be below the upper bound")
 
         self.ic_dist = ic_dist or (lambda: INITIAL_STATE.copy())
-        # The reward specifies the control objective; it is separate from both
-        # the numerical integrator and the Q-learning update below.
         self.state_cost_fn = state_cost_fn or default_state_cost_fn
 
         self.state: Optional[np.ndarray] = None
@@ -251,7 +228,6 @@ class LorenzEnvEuler:
         self._terminated = False
 
     def reset(self, x0: Optional[np.ndarray] = None) -> np.ndarray:
-        """Start an episode and return a copy of its initial state."""
         initial_state = x0 if x0 is not None else self.ic_dist()
         self.state = np.asarray(initial_state, dtype=np.float64).copy()
         if self.state.shape != (3,):
@@ -268,7 +244,6 @@ class LorenzEnvEuler:
     def step(
         self, action: Union[int, float]
     ) -> Tuple[np.ndarray, float, bool, Dict[str, bool]]:
-        """Advance the Lorenz dynamics by one Euler step."""
         if self.state is None:
             raise RuntimeError("Must call reset() before step()")
         if self._terminated:
@@ -305,8 +280,7 @@ class LorenzEnvEuler:
                     state_scale > self.divergence_threshold / scaled_norm
                 )
 
-        # Scaling each contribution by the reference mean's denominator makes
-        # a full episode's return exactly the negative reference objective.
+        # Scale state costs by the episode length so returns are comparable.
         # The fixed initial-state cost is assigned to the first transition.
         # A divergent transition absorbs the maximum default cost for every
         # unvisited state in the episode.  This both keeps non-finite dynamics
@@ -340,7 +314,6 @@ class LorenzEnvEuler:
 
     @staticmethod
     def _euler_step(state: np.ndarray, u: float) -> np.ndarray:
-        # Euler integration simulates the controlled Lorenz dynamics.
         x, y, z = state
         dx = PRANDTL * (y - x) + u
         dy = x * (RAYLEIGH - z) - y
@@ -349,11 +322,6 @@ class LorenzEnvEuler:
 
 
 class StateDiscretizer:
-    """Map continuous ``[x, y, z]`` states to clipped, uniform bin indices.
-
-    Discretization makes tabular Q-learning feasible, but it is necessarily
-    coarse: every continuous state in one bin shares the same action values.
-    """
 
     def __init__(
         self,
@@ -404,21 +372,19 @@ class StateDiscretizer:
 
 
 class QLearningAgent:
-    """A reproducible tabular Q-learning agent for discrete controls."""
-
     def __init__(
         self,
         n_actions: int,
-        learning_rate: float = 0.1,
-        discount_factor: float = 1.0,
-        epsilon: float = 1.0,
-        epsilon_decay: float = 0.995,
-        epsilon_min: float = 0.05,
-        state_bins: Union[int, Sequence[int]] = 15,
+        learning_rate: float = EXPERIMENT_DEFAULTS.learning_rate,
+        discount_factor: float = EXPERIMENT_DEFAULTS.discount_factor,
+        epsilon: float = EXPERIMENT_DEFAULTS.epsilon,
+        epsilon_decay: float = EXPERIMENT_DEFAULTS.epsilon_decay,
+        epsilon_min: float = EXPERIMENT_DEFAULTS.epsilon_min,
+        state_bins: Union[int, Sequence[int]] = EXPERIMENT_DEFAULTS.state_bins,
         state_bounds: Sequence[Tuple[float, float]] = DEFAULT_STATE_BOUNDS,
-        random_seed: Optional[int] = None,
+        random_seed: Optional[int] = EXPERIMENT_DEFAULTS.exploration_seed,
     ):
-        """Create a tabular Q-learning agent."""
+
         if not isinstance(n_actions, (int, np.integer)) or isinstance(
             n_actions, (bool, np.bool_)
         ):
@@ -456,11 +422,9 @@ class QLearningAgent:
         )
 
     def discretize_state(self, state: Sequence[float]) -> Tuple[int, int, int]:
-        """Map a continuous Lorenz state to the agent's state-bin tuple."""
         return self.discretizer.discretize(state)
 
     def select_action(self, state: Sequence[float], training: bool = True) -> int:
-        """Select an epsilon-greedy training action or a greedy evaluation action."""
         state_index = self.discretize_state(state)
         if training and self.rng.random() < self.epsilon:
             return int(self.rng.integers(self.n_actions))
@@ -474,11 +438,6 @@ class QLearningAgent:
         next_state: Sequence[float],
         done: bool,
     ) -> float:
-        """Apply one standard off-policy tabular Q-learning update.
-
-        Returns the temporal-difference error.  Terminal transitions use the
-        reward alone and therefore never bootstrap from ``next_state``.
-        """
         if not isinstance(action, (int, np.integer)):
             raise TypeError("action must be an integer index")
         action_index = int(action)
@@ -507,7 +466,6 @@ class QLearningAgent:
         return float(td_error)
 
     def decay_epsilon(self) -> float:
-        """Decay epsilon without allowing it to fall below ``epsilon_min``."""
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
         return self.epsilon
 
@@ -530,13 +488,37 @@ def _rolling_mean(values: List[float], window: int = 100) -> List[float]:
     return means
 
 
+def _run_training_episode(
+    env: LorenzEnvEuler,
+    agent: QLearningAgent,
+    max_steps: Optional[int],
+) -> Tuple[float, int, bool]:
+    """Run one exploratory episode and update the shared Q-table."""
+    state = env.reset()
+    total_reward = 0.0
+    steps = 0
+    done = False
+    episode_diverged = False
+
+    while not done and (max_steps is None or steps < max_steps):
+        action = agent.select_action(state.tolist(), training=True)
+        next_state, reward, done, info = env.step(action)
+        agent.update(state.tolist(), action, reward, next_state.tolist(), done)
+        state = next_state
+        total_reward += reward
+        steps += 1
+        episode_diverged = episode_diverged or bool(info.get("diverged", False))
+
+    agent.decay_epsilon()
+    return float(total_reward), steps, episode_diverged
+
+
 def train_q_learning(
     env: LorenzEnvEuler,
     agent: QLearningAgent,
     num_episodes: int,
     max_steps: Optional[int] = None,
 ) -> TrainingHistory:
-    """Train ``agent`` against ``env`` and return episode-level history."""
     _validate_discrete_pair(env, agent)
     if not isinstance(num_episodes, (int, np.integer)) or isinstance(
         num_episodes, (bool, np.bool_)
@@ -557,30 +539,28 @@ def train_q_learning(
     epsilons: List[float] = []
     diverged: List[bool] = []
 
-    for _ in range(num_episodes):
-        state = env.reset()
-        total_reward = 0.0
-        steps = 0
-        done = False
-        episode_diverged = False
-
-        while not done and (max_steps is None or steps < max_steps):
-            action = agent.select_action(state.tolist(), training=True)
-            next_state, reward, done, info = env.step(action)
-            # ``max_steps`` is a time-limit truncation, not a terminal Lorenz
-            # state, so only the environment's terminal flag stops bootstrap.
-            agent.update(state.tolist(), action, reward, next_state.tolist(), done)
-            state = next_state
-            total_reward += reward
-            steps += 1
-            episode_diverged = episode_diverged or bool(info.get("diverged", False))
-
-        agent.decay_epsilon()
+    for episode in range(1, num_episodes + 1):
+        total_reward, steps, episode_diverged = _run_training_episode(
+            env, agent, max_steps
+        )
         episode_rewards.append(float(total_reward))
         episode_lengths.append(steps)
         epsilons.append(agent.epsilon)
         diverged.append(episode_diverged)
 
+        if episode % PRINT_EVERY == 0:
+            recent_rewards = episode_rewards[-PRINT_EVERY:]
+            nonzero_entries = np.count_nonzero(agent.q_table)
+            print(
+                f"Episode {episode}/{num_episodes} | "
+                f"average reward: {np.mean(recent_rewards):.4f} | "
+                f"steps: {steps} | "
+                f"epsilon: {agent.epsilon:.4f} | "
+                f"nonzero Q-values: {nonzero_entries}/{agent.q_table.size} | "
+                f"Q range: [{agent.q_table.min():.4f}, "
+                f"{agent.q_table.max():.4f}]"
+            )
+        
     return {
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
@@ -589,13 +569,9 @@ def train_q_learning(
         "rolling_mean_rewards": _rolling_mean(episode_rewards),
     }
 
-#Creates control function for the Q-learning agent.
-#The control function is used to evaluate the performance of the agent after training.
-#It runs the agent in the environment without exploration and without updating the Q-table,
-# and collects statistics about the episodes.
-#It is an evaluation/control rollout function, not a training function.
 
-def control_q_learning(
+
+def evaluate_q_learning(
     env: LorenzEnvEuler,
     agent: QLearningAgent,
     num_episodes: int,
@@ -603,12 +579,6 @@ def control_q_learning(
     x0: Optional[np.ndarray] = None,
     initial_states: Optional[Sequence[Sequence[float]]] = None,
 ) -> EvaluationResults:
-    """Evaluate greedily without exploration or Q-table updates.
-
-    Each trajectory includes its initial state. ``initial_states`` may provide
-    one distinct start per episode. ``actions`` contains discrete action
-    indices; ``control_values`` contains their corresponding controls.
-    """
     _validate_discrete_pair(env, agent)
     if not isinstance(num_episodes, (int, np.integer)) or isinstance(
         num_episodes, (bool, np.bool_)
@@ -639,9 +609,7 @@ def control_q_learning(
     all_controls: List[np.ndarray] = []
     trajectories: List[np.ndarray] = []
     diverged: List[bool] = []
-    task_losses: List[float] = []
     control_efforts: List[float] = []
-    objectives: List[float] = []
 
     for episode_index in range(num_episodes):
         episode_x0 = (
@@ -679,22 +647,6 @@ def control_q_learning(
         diverged.append(episode_diverged)
         effort = control_effort(control_array.tolist(), env.u_ref)
         control_efforts.append(effort)
-        if episode_diverged:
-            # Non-finite trajectories have no meaningful reference objective;
-            # report them as failures instead of leaking NaNs into summaries.
-            task_losses.append(float("inf"))
-            objectives.append(float("inf"))
-        else:
-            task_loss = calculate_loss(trajectory)
-            task_losses.append(task_loss)
-            objectives.append(
-                reference_objective(
-                    trajectory,
-                    control_array.tolist(),
-                    lam=env.alpha,
-                    regularized=env.regularized,
-                )
-            )
 
     return {
         "episode_rewards": episode_rewards,
@@ -703,165 +655,178 @@ def control_q_learning(
         "control_values": all_controls,
         "trajectories": trajectories,
         "diverged": diverged,
-        "task_losses": task_losses,
         "control_efforts": control_efforts,
-        "objectives": objectives,
     }
 
 
+# Backward-compatible name retained for callers that used the original API.
+control_q_learning = evaluate_q_learning
+
+
+def train_q_learning_with_evaluation(
+    training_env: LorenzEnvEuler,
+    evaluation_env: LorenzEnvEuler,
+    agent: QLearningAgent,
+    num_episodes: int,
+    evaluation_interval: int,
+    evaluation_episodes: int,
+    max_steps: Optional[int] = None,
+    evaluation_max_steps: Optional[int] = None,
+    evaluation_initial_states: Optional[Sequence[Sequence[float]]] = None,
+) -> Tuple[TrainingHistory, CheckpointEvaluationHistory, EvaluationResults]:
+    """Train continuously and greedily evaluate at fixed checkpoints.
+
+    Training history spans all episodes without being restarted. Evaluation
+    never updates the Q-table or epsilon. The final episode is always a
+    checkpoint, even when it is not divisible by ``evaluation_interval``.
+    """
+    _validate_discrete_pair(training_env, agent)
+    _validate_discrete_pair(evaluation_env, agent)
+    for name, value in (
+        ("num_episodes", num_episodes),
+        ("evaluation_interval", evaluation_interval),
+        ("evaluation_episodes", evaluation_episodes),
+    ):
+        if not isinstance(value, (int, np.integer)) or isinstance(
+            value, (bool, np.bool_)
+        ):
+            raise TypeError(f"{name} must be an integer")
+        if value < 1:
+            raise ValueError(f"{name} must be at least 1")
+    for name, value in (
+        ("max_steps", max_steps),
+        ("evaluation_max_steps", evaluation_max_steps),
+    ):
+        if value is not None:
+            if not isinstance(value, (int, np.integer)) or isinstance(
+                value, (bool, np.bool_)
+            ):
+                raise TypeError(f"{name} must be an integer when supplied")
+            if value < 1:
+                raise ValueError(f"{name} must be at least 1 when supplied")
+
+    checkpoint_initial_states: Optional[np.ndarray] = None
+    if evaluation_initial_states is not None:
+        checkpoint_initial_states = np.asarray(
+            evaluation_initial_states, dtype=np.float64
+        )
+        if checkpoint_initial_states.shape != (evaluation_episodes, 3):
+            raise ValueError(
+                "evaluation_initial_states must have shape "
+                "(evaluation_episodes, 3)"
+            )
+        if not np.isfinite(checkpoint_initial_states).all():
+            raise ValueError(
+                "evaluation_initial_states must contain only finite values"
+            )
+
+    episode_rewards: List[float] = []
+    episode_lengths: List[int] = []
+    epsilons: List[float] = []
+    training_diverged: List[bool] = []
+    checkpoint_episodes: List[int] = []
+    checkpoint_mean_rewards: List[float] = []
+    checkpoint_reward_standard_deviations: List[float] = []
+    checkpoint_divergence_rates: List[float] = []
+    checkpoint_mean_control_efforts: List[float] = []
+    final_evaluation: Optional[EvaluationResults] = None
+
+    for episode in range(1, num_episodes + 1):
+        total_reward, steps, episode_diverged = _run_training_episode(
+            training_env, agent, max_steps
+        )
+        episode_rewards.append(total_reward)
+        episode_lengths.append(steps)
+        epsilons.append(agent.epsilon)
+        training_diverged.append(episode_diverged)
+
+        if episode % PRINT_EVERY == 0:
+            recent_rewards = episode_rewards[-PRINT_EVERY:]
+            nonzero_entries = np.count_nonzero(agent.q_table)
+            print(
+                f"Episode {episode}/{num_episodes} | "
+                f"average reward: {np.mean(recent_rewards):.4f} | "
+                f"steps: {steps} | epsilon: {agent.epsilon:.4f} | "
+                f"nonzero Q-values: {nonzero_entries}/{agent.q_table.size} | "
+                f"Q range: [{agent.q_table.min():.4f}, "
+                f"{agent.q_table.max():.4f}]"
+            )
+
+        if episode % evaluation_interval == 0 or episode == num_episodes:
+            table_before_evaluation = agent.q_table.copy()
+            epsilon_before_evaluation = agent.epsilon
+            evaluation = evaluate_q_learning(
+                evaluation_env,
+                agent,
+                evaluation_episodes,
+                evaluation_max_steps,
+                initial_states=checkpoint_initial_states,
+            )
+            if not np.array_equal(table_before_evaluation, agent.q_table):
+                raise RuntimeError("Checkpoint evaluation unexpectedly changed the Q-table")
+            if agent.epsilon != epsilon_before_evaluation:
+                raise RuntimeError("Checkpoint evaluation unexpectedly changed epsilon")
+
+            rewards = np.asarray(evaluation["episode_rewards"], dtype=np.float64)
+            divergences = np.asarray(evaluation["diverged"], dtype=np.float64)
+            efforts = np.asarray(evaluation["control_efforts"], dtype=np.float64)
+            checkpoint_episodes.append(episode)
+            checkpoint_mean_rewards.append(float(np.mean(rewards)))
+            checkpoint_reward_standard_deviations.append(float(np.std(rewards)))
+            checkpoint_divergence_rates.append(float(np.mean(divergences)))
+            checkpoint_mean_control_efforts.append(float(np.mean(efforts)))
+            final_evaluation = evaluation
+            print(
+                f"Checkpoint {episode}/{num_episodes} | "
+                f"greedy reward: {np.mean(rewards):.4f} +/- {np.std(rewards):.4f} | "
+                f"divergences: {int(np.sum(divergences))}/{evaluation_episodes}"
+            )
+
+    if final_evaluation is None:  # Defensive guard; num_episodes is positive.
+        raise RuntimeError("Training completed without a final evaluation checkpoint")
+
+    training_history: TrainingHistory = {
+        "episode_rewards": episode_rewards,
+        "episode_lengths": episode_lengths,
+        "epsilons": epsilons,
+        "diverged": training_diverged,
+        "rolling_mean_rewards": _rolling_mean(episode_rewards),
+    }
+    checkpoint_history: CheckpointEvaluationHistory = {
+        "episodes": checkpoint_episodes,
+        "mean_rewards": checkpoint_mean_rewards,
+        "reward_standard_deviations": checkpoint_reward_standard_deviations,
+        "divergence_rates": checkpoint_divergence_rates,
+        "mean_control_efforts": checkpoint_mean_control_efforts,
+    }
+    return training_history, checkpoint_history, final_evaluation
+
+
 def main() -> None:
-    """Run a configurable tabular Q-learning example."""
-    defaults = EXPERIMENT_DEFAULTS
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--episodes", type=int, default=defaults.episodes)
-    parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
-    parser.add_argument("--max-steps", type=int, default=defaults.max_steps)
-    parser.add_argument("--eval-max-steps", type=int, default=defaults.eval_max_steps)
-    parser.add_argument(
-        "--initial-condition",
-        type=float,
-        nargs=3,
-        default=list(defaults.ic),
-        metavar=("X0", "Y0", "Z0"),
-    )
-    parser.add_argument(
-        "--exploration-seed",
-        type=int,
-        default=defaults.exploration_seed,
-        help="optional seed for epsilon-greedy exploration only",
-    )
-    parser.add_argument(
-        "--evaluation-seed",
-        type=int,
-        default=defaults.evaluation_seed,
-        help="seed for evaluation initial-condition perturbations",
-    )
-    parser.add_argument(
-        "--eval-ic-perturbation",
-        type=float,
-        default=defaults.evaluation_ic_perturbation,
-        help="maximum per-coordinate perturbation after evaluation Trial 1",
-    )
-    parser.add_argument(
-        "--lyapunov-times",
-        type=float,
-        default=defaults.training_lyapunov_times,
-    )
-    parser.add_argument(
-        "--eval-lyapunov-times",
-        type=float,
-        default=defaults.evaluation_lyapunov_times,
-    )
-    parser.add_argument("--control-cost", type=float, default=defaults.control_cost)
-    parser.add_argument(
-        "--regularized",
-        action=argparse.BooleanOptionalAction,
-        default=defaults.regularized,
-        help="include LAMBDA times normalized control effort",
-    )
-    parser.add_argument("--action-low", type=float, default=defaults.action_low)
-    parser.add_argument("--action-high", type=float, default=defaults.action_high)
-    parser.add_argument("--action-bins", type=int, default=defaults.action_bins)
-    parser.add_argument(
-        "--state-bins",
-        type=int,
-        nargs=3,
-        default=list(defaults.state_bins),
-    )
-    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
-    parser.add_argument(
-        "--discount-factor", type=float, default=defaults.discount_factor
-    )
-    parser.add_argument("--epsilon", type=float, default=defaults.epsilon)
-    parser.add_argument("--epsilon-decay", type=float, default=defaults.epsilon_decay)
-    parser.add_argument("--epsilon-min", type=float, default=defaults.epsilon_min)
-    args = parser.parse_args()
-    if args.episodes < 1:
-        parser.error("--episodes must be at least 1")
-    if args.eval_episodes < 1:
-        parser.error("--eval-episodes must be at least 1")
-    if args.max_steps is not None and args.max_steps < 1:
-        parser.error("--max-steps must be at least 1")
-    if args.eval_max_steps is not None and args.eval_max_steps < 1:
-        parser.error("--eval-max-steps must be at least 1")
-    if args.lyapunov_times <= 0.0 or args.eval_lyapunov_times <= 0.0:
-        parser.error("Lyapunov-time horizons must be positive")
-    if not np.isfinite(args.eval_ic_perturbation) or args.eval_ic_perturbation < 0.0:
-        parser.error("--eval-ic-perturbation must be finite and nonnegative")
-    ic = np.asarray(args.initial_condition, dtype=np.float64)
-    if ic.shape != (3,) or not np.isfinite(ic).all():
-        parser.error("--initial-condition must contain three finite values")
-
-    def fixed_initial_state() -> np.ndarray:
-        return ic.copy()
-
-    training_env = LorenzEnvEuler(
-        alpha=args.control_cost,
-        lyapunov_times=args.lyapunov_times,
+    settings = EXPERIMENT_DEFAULTS
+    env = LorenzEnvEuler(
+        alpha=settings.control_cost,
+        lyapunov_times=settings.training_lyapunov_times,
         action_type="discrete",
-        action_bounds=(args.action_low, args.action_high),
-        n_action_bins=args.action_bins,
-        ic_dist=fixed_initial_state,
-        regularized=args.regularized,
+        action_bounds=(settings.action_low, settings.action_high),
+        n_action_bins=settings.action_bins,
+        regularized=settings.regularized,
         u_ref=U_REF,
     )
-    agent = QLearningAgent(
-        n_actions=len(training_env.actions),
-        learning_rate=args.learning_rate,
-        discount_factor=args.discount_factor,
-        epsilon=args.epsilon,
-        epsilon_decay=args.epsilon_decay,
-        epsilon_min=args.epsilon_min,
-        state_bins=tuple(args.state_bins),
-        random_seed=args.exploration_seed,
-    )
-
-    history = train_q_learning(
-        training_env,
-        agent,
-        args.episodes,
-        args.max_steps,
-    )
-    evaluation_env = LorenzEnvEuler(
-        alpha=args.control_cost,
-        lyapunov_times=args.eval_lyapunov_times,
-        action_type="discrete",
-        action_bounds=(args.action_low, args.action_high),
-        n_action_bins=args.action_bins,
-        ic_dist=fixed_initial_state,
-        regularized=args.regularized,
-        u_ref=U_REF,
-    )
-    evaluation_initial_states = make_evaluation_initial_states(
-        ic.tolist(),
-        args.eval_episodes,
-        args.eval_ic_perturbation,
-        args.evaluation_seed,
-    )
-    evaluation = control_q_learning(
-        evaluation_env,
-        agent,
-        args.eval_episodes,
-        args.eval_max_steps,
-        initial_states=evaluation_initial_states.tolist(),
-    )
+    agent = QLearningAgent(n_actions=len(env.actions))
+    history = train_q_learning(env, agent, num_episodes=EPISODES)
 
     window = min(50, len(history["episode_rewards"]))
     final_training_rewards = history["episode_rewards"][-window:]
-    sample_bin = agent.discretize_state(ic.tolist())
+    sample_bin = agent.discretize_state(INITIAL_STATE)
     sample_q_values = agent.q_table[sample_bin]
-    first_actions = cast(np.ndarray, evaluation["actions"][0])[:10]
 
     print(
-        "learned Q-feedback law: Q", sample_bin, "=",
+        "trained episodes =", EPISODES,
+        "; Q", sample_bin, "=",
         np.array2string(sample_q_values, precision=3),
-        "; greedy actions =", first_actions.tolist(),
         "; epsilon =", f"{agent.epsilon:.4f}",
         "; final", window, "episode reward =", f"{np.mean(final_training_rewards):.4f}",
-        "; objective =", f"{np.mean(evaluation['objectives']):.4f}",
-        "; task loss =", f"{np.mean(evaluation['task_losses']):.4f}",
-        "; control effort =", f"{np.mean(evaluation['control_efforts']):.4f}",
-        "; diverged =", any(evaluation["diverged"]),
     )
 
 
