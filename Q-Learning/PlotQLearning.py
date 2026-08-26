@@ -59,9 +59,11 @@ qlearning = _load_qlearning()
 LorenzEnvEuler = qlearning.LorenzEnvEuler
 QLearningAgent = qlearning.QLearningAgent
 train_q_learning = qlearning.train_q_learning
-control_q_learning = qlearning.control_q_learning
+evaluate_q_learning = qlearning.evaluate_q_learning
+train_q_learning_with_evaluation = qlearning.train_q_learning_with_evaluation
 steps_to_lyapunov_times = qlearning.steps_to_lyapunov_times
 make_evaluation_initial_states = qlearning.make_evaluation_initial_states
+make_random_initial_state_sampler = qlearning.make_random_initial_state_sampler
 
 
 def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
@@ -212,6 +214,64 @@ def plot_training_diagnostics(
     _finish_figure(figure, output_path, show=show, dpi=dpi)
 
 
+def plot_checkpoint_evaluations(
+    checkpoints: Mapping[str, Sequence[Any]],
+    output_path: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Plot greedy policy quality measured during continuous training."""
+    episodes = np.asarray(checkpoints["episodes"], dtype=np.int64)
+    mean_rewards = np.asarray(checkpoints["mean_rewards"], dtype=np.float64)
+    reward_stds = np.asarray(
+        checkpoints["reward_standard_deviations"], dtype=np.float64
+    )
+    divergence_rates = np.asarray(
+        checkpoints["divergence_rates"], dtype=np.float64
+    )
+    mean_efforts = np.asarray(
+        checkpoints["mean_control_efforts"], dtype=np.float64
+    )
+    if episodes.ndim != 1 or episodes.size == 0:
+        raise ValueError("Checkpoint history must contain at least one evaluation")
+    for name, values in (
+        ("mean_rewards", mean_rewards),
+        ("reward_standard_deviations", reward_stds),
+        ("divergence_rates", divergence_rates),
+        ("mean_control_efforts", mean_efforts),
+    ):
+        if values.shape != episodes.shape:
+            raise ValueError(
+                f"checkpoints[{name!r}] must contain {episodes.size} values"
+            )
+
+    figure, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    figure.suptitle("Greedy policy evaluation during training", fontsize=15)
+
+    lower = mean_rewards - reward_stds
+    upper = mean_rewards + reward_stds
+    axes[0].plot(episodes, mean_rewards, marker="o", color="tab:blue")
+    axes[0].fill_between(episodes, lower, upper, color="tab:blue", alpha=0.18)
+    axes[0].set_ylabel("Mean reward")
+    axes[0].set_title("Greedy evaluation reward (band: +/- 1 standard deviation)")
+    axes[0].grid(alpha=0.25)
+
+    axes[1].plot(episodes, divergence_rates, marker="o", color="tab:red")
+    axes[1].set_ylim(-0.02, 1.02)
+    axes[1].set_ylabel("Divergence rate")
+    axes[1].set_title("Fraction of evaluation trials that diverged")
+    axes[1].grid(alpha=0.25)
+
+    axes[2].plot(episodes, mean_efforts, marker="o", color="tab:purple")
+    axes[2].set_xlabel("Completed training episode")
+    axes[2].set_ylabel("Mean control effort")
+    axes[2].set_title("Normalized greedy control effort")
+    axes[2].grid(alpha=0.25)
+
+    _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
 def plot_uncontrolled_lorenz(
     trajectory: np.ndarray,
     output_path: Path | None,
@@ -287,7 +347,7 @@ def plot_evaluation_diagnostics(
     show: bool = False,
     dpi: int = 160,
 ) -> None:
-    """Create separate plots from greedy ``control_q_learning`` results."""
+    """Create separate plots from greedy ``evaluate_q_learning`` results."""
     trajectories = evaluation["trajectories"]
     controls = evaluation["control_values"]
     rewards = np.asarray(evaluation["episode_rewards"], dtype=np.float64)
@@ -648,6 +708,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--episodes", type=int, default=defaults.episodes)
     parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
     parser.add_argument(
+        "--eval-every",
+        type=int,
+        default=defaults.evaluation_interval,
+        help="Run greedy evaluation after this many training episodes",
+    )
+    parser.add_argument(
         "--max-steps",
         type=int,
         default=defaults.max_steps,
@@ -665,13 +731,25 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs=3,
         default=list(defaults.ic),
         metavar=("X0", "Y0", "Z0"),
-        help="fixed Lorenz initial condition",
+        help="reference Lorenz initial condition",
     )
     parser.add_argument(
         "--exploration-seed",
         type=int,
         default=defaults.exploration_seed,
         help="optional seed for epsilon-greedy exploration only",
+    )
+    parser.add_argument(
+        "--training-ic-seed",
+        type=int,
+        default=defaults.training_ic_seed,
+        help="seed for training initial-condition perturbations",
+    )
+    parser.add_argument(
+        "--training-ic-perturbation",
+        type=float,
+        default=defaults.training_ic_perturbation,
+        help="maximum per-coordinate perturbation for every training trial",
     )
     parser.add_argument(
         "--evaluation-seed",
@@ -747,6 +825,8 @@ def main() -> None:
         parser.error("--episodes must be at least 1")
     if args.eval_episodes < 1:
         parser.error("--eval-episodes must be at least 1")
+    if args.eval_every < 1:
+        parser.error("--eval-every must be at least 1")
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
     if args.eval_max_steps is not None and args.eval_max_steps < 1:
@@ -760,6 +840,11 @@ def main() -> None:
         parser.error("--eval-lyapunov-times must be positive")
     if not np.isfinite(args.eval_ic_perturbation) or args.eval_ic_perturbation < 0.0:
         parser.error("--eval-ic-perturbation must be finite and nonnegative")
+    if (
+        not np.isfinite(args.training_ic_perturbation)
+        or args.training_ic_perturbation < 0.0
+    ):
+        parser.error("--training-ic-perturbation must be finite and nonnegative")
     if not np.isfinite(args.control_cost) or args.control_cost < 0.0:
         parser.error("--control-cost must be nonnegative")
     if args.action_bins < 1:
@@ -783,13 +868,17 @@ def main() -> None:
     def fixed_initial_state() -> np.ndarray:
         return reference_state.copy()
 
+    randomized_training_state = make_random_initial_state_sampler(
+        reference_state, args.training_ic_perturbation, args.training_ic_seed
+    )
+
     training_env = LorenzEnvEuler(
         alpha=args.control_cost,
         lyapunov_times=args.lyapunov_times,
         action_type="discrete",
         action_bounds=(args.action_low, args.action_high),
         n_action_bins=args.action_bins,
-        ic_dist=fixed_initial_state,
+        ic_dist=randomized_training_state,
         regularized=args.regularized,
         u_ref=qlearning.U_REF,
     )
@@ -804,12 +893,6 @@ def main() -> None:
         random_seed=args.exploration_seed,
     )
 
-    history = train_q_learning(
-        training_env,
-        agent,
-        args.episodes,
-        args.max_steps,
-    )
     evaluation_env = LorenzEnvEuler(
         alpha=args.control_cost,
         lyapunov_times=args.eval_lyapunov_times,
@@ -820,22 +903,23 @@ def main() -> None:
         regularized=args.regularized,
         u_ref=qlearning.U_REF,
     )
-    table_before_evaluation = agent.q_table.copy()
     evaluation_initial_states = make_evaluation_initial_states(
         reference_state,
         args.eval_episodes,
         args.eval_ic_perturbation,
         args.evaluation_seed,
     )
-    evaluation = control_q_learning(
+    history, checkpoint_history, evaluation = train_q_learning_with_evaluation(
+        training_env,
         evaluation_env,
         agent,
+        args.episodes,
+        args.eval_every,
         args.eval_episodes,
-        args.eval_max_steps,
-        initial_states=evaluation_initial_states,
+        max_steps=args.max_steps,
+        evaluation_max_steps=args.eval_max_steps,
+        evaluation_initial_states=evaluation_initial_states,
     )
-    if not np.array_equal(table_before_evaluation, agent.q_table):
-        raise RuntimeError("Greedy evaluation unexpectedly changed the Q-table")
 
     controlled_trajectories = evaluation["trajectories"]
     if len(controlled_trajectories) == 0:
@@ -862,6 +946,14 @@ def main() -> None:
     plot_training_diagnostics(
         history,
         None if output_dir is None else output_dir / "training_diagnostics.png",
+        show=args.show,
+        dpi=args.dpi,
+    )
+    plot_checkpoint_evaluations(
+        checkpoint_history,
+        None
+        if output_dir is None
+        else output_dir / "checkpoint_evaluations.png",
         show=args.show,
         dpi=args.dpi,
     )
