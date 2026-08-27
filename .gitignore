@@ -35,3 +35,4 @@ events.out.tfevents.*
 
 # Keep local research papers out of GitHub
 /Relevant Papers*/
+node_modules
