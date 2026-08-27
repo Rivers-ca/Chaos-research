@@ -112,7 +112,6 @@ def lyapunov_times_to_steps(lyapunov_times: float) -> int:
 
 
 def steps_to_lyapunov_times(steps: int) -> float:
-    """Convert Euler integration steps to Lyapunov-time units."""
     if not isinstance(steps, (int, np.integer)) or isinstance(
         steps, (bool, np.bool_)
     ):
@@ -516,11 +515,9 @@ def train_q_learning(
 
         if episode % print_every == 0:
             recent_rewards = episode_rewards[-print_every:]
-            rolling_mean_reward = float(np.mean(episode_rewards[-100:]))
             print(
                 f"Episode {episode}/{num_episodes} | "
                 f"average reward: {np.mean(recent_rewards):.4f} | "
-                f"Rolling mean reward: {rolling_mean_reward:.4f} | "
                 f"epsilon: {agent.epsilon:.4f}"
             )
 
@@ -584,29 +581,6 @@ def evaluate_q_learning(
         "trajectories": trajectories,
         "diverged": diverged,
     }
-
-
-def evaluate_uncontrolled_lorenz(
-    env: LorenzEnvEuler,
-    initial_state: StateVector,
-    max_steps: Optional[int] = None,
-) -> np.ndarray:
-    """Run a zero-control baseline from one explicit initial state."""
-    if env.action_type != "continuous":
-        raise ValueError("The uncontrolled baseline requires a continuous-action env")
-    if not env.action_low <= 0.0 <= env.action_high:
-        raise ValueError("The uncontrolled baseline environment must permit u=0")
-    max_steps = _positive_int(max_steps, "max_steps", optional=True)
-
-    state = env.reset(x0=np.asarray(initial_state, dtype=np.float64))
-    trajectory = [state.copy()]
-    done = False
-    steps = 0
-    while not done and (max_steps is None or steps < max_steps):
-        state, _, done, _ = env.step(0.0)
-        trajectory.append(state.copy())
-        steps += 1
-    return np.asarray(trajectory, dtype=np.float64)
 
 
 def _mean_control_effort(evaluation: EvaluationResults, u_ref: float) -> float:
@@ -701,23 +675,10 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         evaluation_initial_states=evaluation_starts.tolist(),
         print_every=settings.print_every,
     )
-    controlled_trajectories = cast(List[np.ndarray], evaluation["trajectories"])
-    if not controlled_trajectories:
-        raise RuntimeError("Evaluation returned no trajectory for baseline comparison")
-    baseline_initial_state = np.asarray(
-        controlled_trajectories[0][0], dtype=np.float64
-    )
-    uncontrolled_env = LorenzEnvEuler(settings, training=False, controlled=False)
-    uncontrolled_trajectory = evaluate_uncontrolled_lorenz(
-        uncontrolled_env,
-        baseline_initial_state,
-        max_steps=settings.eval_max_steps,
-    )
     return {
         "history": history,
         "checkpoints": checkpoints,
         "evaluation": evaluation,
-        "uncontrolled_trajectory": uncontrolled_trajectory,
         "q_table": agent.q_table.copy(),
         "actions": training_env.actions.copy(),
         "state_bounds": agent.discretizer.bounds.copy(),
