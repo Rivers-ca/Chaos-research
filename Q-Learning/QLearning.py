@@ -8,9 +8,6 @@ class TrainingHistory(TypedDict):
     episode_lengths: List[int]
     epsilons: List[float]
     diverged: List[bool]
-    unique_state_bins_visited: List[int]
-    q_table_coverages: List[float]
-    mean_abs_td_errors: List[float]
     rolling_mean_rewards: List[float]
 
 import numpy as np
@@ -71,7 +68,7 @@ class ExperimentDefaults:
     learning_rate: float = 0.01
     discount_factor: float = 1.0
     epsilon: float = 0.99
-    epsilon_decay: float = 0.995
+    epsilon_decay: float = 0.99
     epsilon_min: float = 0.05
 
     def make_training_initial_state_sampler(self) -> Callable[[], np.ndarray]:
@@ -112,6 +109,17 @@ def _finite_array(values: ArrayLike, shape: Tuple[int, ...], message: str) -> np
 
 def lyapunov_times_to_steps(lyapunov_times: float) -> int:
     return round(lyapunov_times / (LYAPUNOV_EXP * DT))
+
+
+def steps_to_lyapunov_times(steps: int) -> float:
+    """Convert Euler integration steps to Lyapunov-time units."""
+    if not isinstance(steps, (int, np.integer)) or isinstance(
+        steps, (bool, np.bool_)
+    ):
+        raise TypeError("steps must be an integer")
+    if steps < 0:
+        raise ValueError("steps must be nonnegative")
+    return float(steps * LYAPUNOV_EXP * DT)
 
 
 def make_evaluation_initial_states(
@@ -420,9 +428,6 @@ class _EpisodeResult:
     actions: np.ndarray
     controls: np.ndarray
     trajectory: np.ndarray
-    visited_bins: set[Tuple[int, int, int]]
-    updated_pairs: set[Tuple[int, int, int, int]]
-    abs_td_errors: List[float]
 
 
 def _validate_discrete_pair(env: LorenzEnvEuler, agent: QLearningAgent) -> None:
@@ -449,9 +454,6 @@ def _run_episode(
     states = [] if training else [current_state.copy()]
     actions: List[int] = []
     controls: List[float] = []
-    visited_bins = {agent.discretize_state(current_state)} if training else set()
-    updated_pairs: set[Tuple[int, int, int, int]] = set()
-    abs_td_errors: List[float] = []
     total_reward, steps, diverged = 0.0, 0, False
     done = False
 
@@ -459,14 +461,7 @@ def _run_episode(
         action = agent.select_action(current_state, training=training)
         next_state, reward, done, info = env.step(action)
         if training:
-            state_index = agent.discretize_state(current_state)
-            td_error = agent.update(
-                current_state, action, reward, next_state, done
-            )
-            abs_td_errors.append(abs(td_error))
-            updated_pairs.add(state_index + (action,))
-            if np.isfinite(next_state).all():
-                visited_bins.add(agent.discretize_state(next_state))
+            agent.update(current_state, action, reward, next_state, done)
         else:
             actions.append(action)
             controls.append(float(env.actions[action]))
@@ -479,8 +474,7 @@ def _run_episode(
     return _EpisodeResult(float(total_reward), steps, diverged,
                           np.asarray(actions, dtype=np.int64),
                           np.asarray(controls, dtype=np.float64),
-                          np.asarray(states, dtype=np.float64),
-                          visited_bins, updated_pairs, abs_td_errors)
+                          np.asarray(states, dtype=np.float64))
 
 
 def train_q_learning(
@@ -489,38 +483,33 @@ def train_q_learning(
     num_episodes: int,
     max_steps: Optional[int] = None,
     print_every: int = EXPERIMENT_DEFAULTS.print_every,
-    total_episodes: Optional[int] = None,
-    start_episode: int = 0,
+    evaluation_interval: Optional[int] = None,
+    on_evaluation: Optional[Callable[[int], None]] = None,
 ) -> TrainingHistory:
     _validate_discrete_pair(env, agent)
     num_episodes = cast(int, _positive_int(num_episodes, "num_episodes"))
     max_steps = _positive_int(max_steps, "max_steps", optional=True)
     print_every = cast(int, _positive_int(print_every, "print_every"))
-    if total_episodes is None:
-        total_episodes = num_episodes
+    evaluation_interval = _positive_int(
+        evaluation_interval, "evaluation_interval", optional=True
+    )
+    if evaluation_interval is not None and on_evaluation is None:
+        raise ValueError("evaluation_interval requires an on_evaluation callback")
+    if on_evaluation is not None and evaluation_interval is None:
+        raise ValueError("on_evaluation requires an evaluation_interval")
 
     episode_rewards: List[float] = []
     episode_lengths: List[int] = []
     epsilons: List[float] = []
     diverged: List[bool] = []
-    unique_state_bins_visited: List[int] = []
-    q_table_coverages: List[float] = []
-    mean_abs_td_errors: List[float] = []
-    updated_state_action_pairs = set()
 
     for episode in range(1, num_episodes + 1):
         result = _run_episode(env, agent, max_steps, training=True)
-        updated_state_action_pairs.update(result.updated_pairs)
         agent.decay_epsilon()
         episode_rewards.append(result.reward)
         episode_lengths.append(result.length)
         epsilons.append(agent.epsilon)
         diverged.append(result.diverged)
-        unique_state_bins_visited.append(len(result.visited_bins))
-        q_table_coverages.append(100.0 * len(updated_state_action_pairs) /
-                                 agent.q_table.size)
-        mean_abs_td_errors.append(float(np.mean(result.abs_td_errors))
-                                  if result.abs_td_errors else 0.0)
 
         if result.diverged:
             print(f"ALERT: Lorenz system diverged during episode {episode}.")
@@ -528,22 +517,23 @@ def train_q_learning(
         if episode % print_every == 0:
             recent_rewards = episode_rewards[-print_every:]
             rolling_mean_reward = float(np.mean(episode_rewards[-100:]))
-            global_episode = start_episode + episode
             print(
-                f"Episode {global_episode}/{total_episodes} | "
+                f"Episode {episode}/{num_episodes} | "
                 f"average reward: {np.mean(recent_rewards):.4f} | "
                 f"Rolling mean reward: {rolling_mean_reward:.4f} | "
                 f"epsilon: {agent.epsilon:.4f}"
             )
-        
+
+        if on_evaluation is not None and evaluation_interval is not None and (
+            episode % evaluation_interval == 0 or episode == num_episodes
+        ):
+            on_evaluation(episode)
+
     return {
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
         "epsilons": epsilons,
         "diverged": diverged,
-        "unique_state_bins_visited": unique_state_bins_visited,
-        "q_table_coverages": q_table_coverages,
-        "mean_abs_td_errors": mean_abs_td_errors,
         "rolling_mean_rewards": _rolling_mean(episode_rewards),
     }
 
@@ -596,6 +586,42 @@ def evaluate_q_learning(
     }
 
 
+def evaluate_uncontrolled_lorenz(
+    env: LorenzEnvEuler,
+    initial_state: StateVector,
+    max_steps: Optional[int] = None,
+) -> np.ndarray:
+    """Run a zero-control baseline from one explicit initial state."""
+    if env.action_type != "continuous":
+        raise ValueError("The uncontrolled baseline requires a continuous-action env")
+    if not env.action_low <= 0.0 <= env.action_high:
+        raise ValueError("The uncontrolled baseline environment must permit u=0")
+    max_steps = _positive_int(max_steps, "max_steps", optional=True)
+
+    state = env.reset(x0=np.asarray(initial_state, dtype=np.float64))
+    trajectory = [state.copy()]
+    done = False
+    steps = 0
+    while not done and (max_steps is None or steps < max_steps):
+        state, _, done, _ = env.step(0.0)
+        trajectory.append(state.copy())
+        steps += 1
+    return np.asarray(trajectory, dtype=np.float64)
+
+
+def _mean_control_effort(evaluation: EvaluationResults, u_ref: float) -> float:
+    """Return mean squared normalized control across an evaluation batch."""
+    episodes = cast(List[np.ndarray], evaluation["control_values"])
+    if not episodes:
+        return 0.0
+    controls = np.concatenate(
+        [np.asarray(values, dtype=np.float64) for values in episodes]
+    )
+    if controls.size == 0:
+        return 0.0
+    return float(np.mean((controls / u_ref) ** 2))
+
+
 def train_q_learning_with_evaluation(
     training_env: LorenzEnvEuler,
     evaluation_env: LorenzEnvEuler,
@@ -606,21 +632,13 @@ def train_q_learning_with_evaluation(
     max_steps: Optional[int] = None,
     evaluation_max_steps: Optional[int] = None,
     evaluation_initial_states: Optional[Sequence[Sequence[float]]] = None,
+    print_every: int = EXPERIMENT_DEFAULTS.print_every,
 ) -> Tuple[TrainingHistory, Dict[str, List[Union[int, float]]], EvaluationResults]:
-    evaluation_interval = cast(int, _positive_int(evaluation_interval,
-                                                  "evaluation_interval"))
-
-    checkpoint_episodes = list(range(evaluation_interval, num_episodes, evaluation_interval))
-    checkpoint_episodes.append(num_episodes)
-    history_parts: List[TrainingHistory] = []
+    checkpoint_episodes: List[int] = []
     evaluations: List[EvaluationResults] = []
-    previous_episode = 0
 
-    for episode in checkpoint_episodes:
-        history_parts.append(train_q_learning(
-            training_env, agent, episode - previous_episode, max_steps=max_steps,
-            total_episodes=num_episodes, start_episode=previous_episode
-        ))
+    def run_evaluation(episode: int) -> None:
+        checkpoint_episodes.append(episode)
         evaluations.append(
             evaluate_q_learning(
                 evaluation_env,
@@ -630,13 +648,16 @@ def train_q_learning_with_evaluation(
                 initial_states=evaluation_initial_states,
             )
         )
-        previous_episode = episode
 
-    history = cast(TrainingHistory, {
-        key: sum((part[key] for part in history_parts), [])
-        for key in history_parts[0] if key != "rolling_mean_rewards"
-    })
-    history["rolling_mean_rewards"] = _rolling_mean(history["episode_rewards"])
+    history = train_q_learning(
+        training_env,
+        agent,
+        num_episodes,
+        max_steps=max_steps,
+        print_every=print_every,
+        evaluation_interval=evaluation_interval,
+        on_evaluation=run_evaluation,
+    )
 
     rewards = [np.asarray(result["episode_rewards"], dtype=float) for result in evaluations]
     checkpoints = {
@@ -644,6 +665,10 @@ def train_q_learning_with_evaluation(
         "mean_rewards": [float(np.mean(values)) for values in rewards],
         "reward_standard_deviations": [float(np.std(values)) for values in rewards],
         "divergence_rates": [float(np.mean(result["diverged"])) for result in evaluations],
+        "mean_control_efforts": [
+            _mean_control_effort(result, evaluation_env.u_ref)
+            for result in evaluations
+        ],
     }
     return history, checkpoints, evaluations[-1]
 
@@ -674,11 +699,25 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         max_steps=settings.max_steps,
         evaluation_max_steps=settings.eval_max_steps,
         evaluation_initial_states=evaluation_starts.tolist(),
+        print_every=settings.print_every,
+    )
+    controlled_trajectories = cast(List[np.ndarray], evaluation["trajectories"])
+    if not controlled_trajectories:
+        raise RuntimeError("Evaluation returned no trajectory for baseline comparison")
+    baseline_initial_state = np.asarray(
+        controlled_trajectories[0][0], dtype=np.float64
+    )
+    uncontrolled_env = LorenzEnvEuler(settings, training=False, controlled=False)
+    uncontrolled_trajectory = evaluate_uncontrolled_lorenz(
+        uncontrolled_env,
+        baseline_initial_state,
+        max_steps=settings.eval_max_steps,
     )
     return {
         "history": history,
         "checkpoints": checkpoints,
         "evaluation": evaluation,
+        "uncontrolled_trajectory": uncontrolled_trajectory,
         "q_table": agent.q_table.copy(),
         "actions": training_env.actions.copy(),
         "state_bounds": agent.discretizer.bounds.copy(),
