@@ -8,6 +8,8 @@ class TrainingHistory(TypedDict):
     episode_lengths: List[int]
     epsilons: List[float]
     diverged: List[bool]
+    first_target_steps: List[Optional[int]]
+    target_steps: List[int]
     rolling_mean_rewards: List[float]
 
 import numpy as np
@@ -25,6 +27,13 @@ U_REF = 60.0
 LAMBDA = 0.007
 EPISODES = 1000
 
+FIXED_POINT_COORDINATE = float(np.sqrt(B * (RAYLEIGH - 1)))
+TARGET_FIXED_POINT = np.array(
+    [-FIXED_POINT_COORDINATE, -FIXED_POINT_COORDINATE, RAYLEIGH - 1],
+    dtype=np.float64,
+)
+FIXED_POINT_TOLERANCE = 2.0
+
 DEFAULT_STATE_BOUNDS: Tuple[Tuple[float, float], ...] = (
     (-30.0, 30.0), (-30.0, 30.0), (0.0, 60.0))
 
@@ -35,6 +44,16 @@ def phi(x: Union[float, np.ndarray], eps: float = EPS) -> Union[float, np.ndarra
 
 def default_state_cost_fn(x: float) -> float:
     return float(phi(float(x)))
+
+
+def is_at_target_fixed_point(state: StateVector) -> bool:
+    """Return whether a Lorenz state is within the target's tolerance radius."""
+    state_array = np.asarray(state, dtype=np.float64)
+    return bool(
+        state_array.shape == (3,)
+        and np.isfinite(state_array).all()
+        and np.linalg.norm(state_array - TARGET_FIXED_POINT) <= FIXED_POINT_TOLERANCE
+    )
 
 
 @dataclass(frozen=True)
@@ -66,10 +85,10 @@ class ExperimentDefaults:
 
     state_bins: Tuple[int, int, int] = (15, 15, 15)
     learning_rate: float = 0.01
-    discount_factor: float = 1.0
+    discount_factor: float = 0.01
     epsilon: float = 0.99
-    epsilon_decay: float = 0.99
-    epsilon_min: float = 0.05
+    epsilon_decay: float = 0.995
+    epsilon_min: float = 0.0
 
     def make_training_initial_state_sampler(self) -> Callable[[], np.ndarray]:
         return make_random_initial_state_sampler(
@@ -112,7 +131,6 @@ def lyapunov_times_to_steps(lyapunov_times: float) -> int:
 
 
 def steps_to_lyapunov_times(steps: int) -> float:
-    """Convert Euler integration steps to Lyapunov-time units."""
     if not isinstance(steps, (int, np.integer)) or isinstance(
         steps, (bool, np.bool_)
     ):
@@ -425,6 +443,8 @@ class _EpisodeResult:
     reward: float
     length: int
     diverged: bool
+    first_target_step: Optional[int]
+    target_steps: int
     actions: np.ndarray
     controls: np.ndarray
     trajectory: np.ndarray
@@ -455,6 +475,8 @@ def _run_episode(
     actions: List[int] = []
     controls: List[float] = []
     total_reward, steps, diverged = 0.0, 0, False
+    first_target_step: Optional[int] = None
+    target_steps = 0
     done = False
 
     while not done and (max_steps is None or steps < max_steps):
@@ -469,9 +491,14 @@ def _run_episode(
         current_state = next_state
         total_reward += reward
         steps += 1
+        if is_at_target_fixed_point(next_state):
+            if first_target_step is None:
+                first_target_step = steps
+            target_steps += 1
         diverged = diverged or bool(info.get("diverged", False))
 
     return _EpisodeResult(float(total_reward), steps, diverged,
+                          first_target_step, target_steps,
                           np.asarray(actions, dtype=np.int64),
                           np.asarray(controls, dtype=np.float64),
                           np.asarray(states, dtype=np.float64))
@@ -502,6 +529,8 @@ def train_q_learning(
     episode_lengths: List[int] = []
     epsilons: List[float] = []
     diverged: List[bool] = []
+    first_target_steps: List[Optional[int]] = []
+    target_steps: List[int] = []
 
     for episode in range(1, num_episodes + 1):
         result = _run_episode(env, agent, max_steps, training=True)
@@ -510,17 +539,24 @@ def train_q_learning(
         episode_lengths.append(result.length)
         epsilons.append(agent.epsilon)
         diverged.append(result.diverged)
+        first_target_steps.append(result.first_target_step)
+        target_steps.append(result.target_steps)
+
+        if result.first_target_step is not None:
+            print(
+                f"Episode {episode} reached the target fixed point at step "
+                f"{result.first_target_step} and held it for "
+                f"{result.target_steps}/{result.length} steps."
+            )
 
         if result.diverged:
             print(f"ALERT: Lorenz system diverged during episode {episode}.")
 
         if episode % print_every == 0:
             recent_rewards = episode_rewards[-print_every:]
-            rolling_mean_reward = float(np.mean(episode_rewards[-100:]))
             print(
                 f"Episode {episode}/{num_episodes} | "
                 f"average reward: {np.mean(recent_rewards):.4f} | "
-                f"Rolling mean reward: {rolling_mean_reward:.4f} | "
                 f"epsilon: {agent.epsilon:.4f}"
             )
 
@@ -534,6 +570,8 @@ def train_q_learning(
         "episode_lengths": episode_lengths,
         "epsilons": epsilons,
         "diverged": diverged,
+        "first_target_steps": first_target_steps,
+        "target_steps": target_steps,
         "rolling_mean_rewards": _rolling_mean(episode_rewards),
     }
 
@@ -584,29 +622,6 @@ def evaluate_q_learning(
         "trajectories": trajectories,
         "diverged": diverged,
     }
-
-
-def evaluate_uncontrolled_lorenz(
-    env: LorenzEnvEuler,
-    initial_state: StateVector,
-    max_steps: Optional[int] = None,
-) -> np.ndarray:
-    """Run a zero-control baseline from one explicit initial state."""
-    if env.action_type != "continuous":
-        raise ValueError("The uncontrolled baseline requires a continuous-action env")
-    if not env.action_low <= 0.0 <= env.action_high:
-        raise ValueError("The uncontrolled baseline environment must permit u=0")
-    max_steps = _positive_int(max_steps, "max_steps", optional=True)
-
-    state = env.reset(x0=np.asarray(initial_state, dtype=np.float64))
-    trajectory = [state.copy()]
-    done = False
-    steps = 0
-    while not done and (max_steps is None or steps < max_steps):
-        state, _, done, _ = env.step(0.0)
-        trajectory.append(state.copy())
-        steps += 1
-    return np.asarray(trajectory, dtype=np.float64)
 
 
 def _mean_control_effort(evaluation: EvaluationResults, u_ref: float) -> float:
@@ -701,23 +716,10 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         evaluation_initial_states=evaluation_starts.tolist(),
         print_every=settings.print_every,
     )
-    controlled_trajectories = cast(List[np.ndarray], evaluation["trajectories"])
-    if not controlled_trajectories:
-        raise RuntimeError("Evaluation returned no trajectory for baseline comparison")
-    baseline_initial_state = np.asarray(
-        controlled_trajectories[0][0], dtype=np.float64
-    )
-    uncontrolled_env = LorenzEnvEuler(settings, training=False, controlled=False)
-    uncontrolled_trajectory = evaluate_uncontrolled_lorenz(
-        uncontrolled_env,
-        baseline_initial_state,
-        max_steps=settings.eval_max_steps,
-    )
     return {
         "history": history,
         "checkpoints": checkpoints,
         "evaluation": evaluation,
-        "uncontrolled_trajectory": uncontrolled_trajectory,
         "q_table": agent.q_table.copy(),
         "actions": training_env.actions.copy(),
         "state_bounds": agent.discretizer.bounds.copy(),

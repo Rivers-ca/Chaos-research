@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import dataclasses
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import numpy as np
@@ -41,7 +43,6 @@ class QLearningRegressionTests(unittest.TestCase):
                 "history",
                 "checkpoints",
                 "evaluation",
-                "uncontrolled_trajectory",
                 "q_table",
                 "actions",
                 "state_bounds",
@@ -53,7 +54,6 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(len(run["checkpoints"]["mean_control_efforts"]), 2)
         self.assertEqual(len(run["history"]["episode_rewards"]), 3)
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
-        self.assertEqual(np.asarray(run["uncontrolled_trajectory"]).shape, (3, 3))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.pkl"
             qlearning.save_q_learning_run(run, path)
@@ -71,6 +71,34 @@ class QLearningRegressionTests(unittest.TestCase):
     def test_default_state_cost_uses_phi(self) -> None:
         self.assertAlmostEqual(
             qlearning.default_state_cost_fn(2.0), float(qlearning.phi(2.0))
+        )
+
+    def test_training_reports_target_fixed_point_occupancy(self) -> None:
+        settings = experiment_settings(
+            ic=tuple(qlearning.TARGET_FIXED_POINT),
+            training_ic_perturbation=0.0,
+            training_lyapunov_times=3 * qlearning.LYAPUNOV_EXP * qlearning.DT,
+            action_bins=3,
+        )
+        env = qlearning.LorenzEnvEuler(settings, training=True)
+        agent = qlearning.QLearningAgent(
+            n_actions=3,
+            epsilon=0.0,
+            epsilon_min=0.0,
+        )
+        agent.q_table[..., 1] = 1.0  # Select zero control at the fixed point.
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            history = qlearning.train_q_learning(
+                env, agent, num_episodes=1, print_every=2
+            )
+
+        self.assertEqual(history["first_target_steps"], [1])
+        self.assertEqual(history["target_steps"], [3])
+        self.assertIn(
+            "Episode 1 reached the target fixed point at step 1 and held it for 3/3 steps.",
+            output.getvalue(),
         )
 
     def test_full_episode_return_is_finite(self) -> None:
