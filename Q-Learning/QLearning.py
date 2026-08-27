@@ -27,7 +27,6 @@ U_REF = 60.0
 LAMBDA = 0.007
 EPISODES = 1000
 
-# The negative nonzero equilibrium of the uncontrolled Lorenz system.
 FIXED_POINT_COORDINATE = float(np.sqrt(B * (RAYLEIGH - 1)))
 TARGET_FIXED_POINT = np.array(
     [-FIXED_POINT_COORDINATE, -FIXED_POINT_COORDINATE, RAYLEIGH - 1],
@@ -86,10 +85,10 @@ class ExperimentDefaults:
 
     state_bins: Tuple[int, int, int] = (15, 15, 15)
     learning_rate: float = 0.01
-    discount_factor: float = 1.0
+    discount_factor: float = 0.01
     epsilon: float = 0.99
-    epsilon_decay: float = 0.99
-    epsilon_min: float = 0.05
+    epsilon_decay: float = 0.995
+    epsilon_min: float = 0.0
 
     def make_training_initial_state_sampler(self) -> Callable[[], np.ndarray]:
         return make_random_initial_state_sampler(
