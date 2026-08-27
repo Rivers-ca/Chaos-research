@@ -238,74 +238,6 @@ def plot_checkpoint_evaluations(
     _finish_figure(figure, output_path, show=show, dpi=dpi)
 
 
-def plot_uncontrolled_lorenz(
-    trajectory: np.ndarray,
-    output_path: Path | None,
-    *,
-    show: bool = False,
-    dpi: int = 160,
-) -> None:
-    """Plot a zero-control trajectory produced by ``LorenzEnvEuler``."""
-    points = np.asarray(trajectory, dtype=np.float64)
-    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] < 2:
-        raise ValueError("Uncontrolled trajectory must have shape (n, 3), n >= 2")
-
-    duration = steps_to_lyapunov_times(points.shape[0] - 1)
-    figure = plt.figure(figsize=(10, 8))
-    axis = figure.add_subplot(111, projection="3d")
-    axis.plot(
-        points[:, 0],
-        points[:, 1],
-        points[:, 2],
-        color="tab:blue",
-        linewidth=0.5,
-        alpha=0.85,
-    )
-    axis.scatter(*points[0], color="tab:green", s=35, label="Start", depthshade=False)
-    axis.scatter(*points[-1], color="tab:red", s=35, label="End", depthshade=False)
-    axis.set_xlabel("X Axis")
-    axis.set_ylabel("Y Axis")
-    axis.set_zlabel("Z Axis")
-    axis.set_title(
-        f"Uncontrolled Lorenz trajectory (u = 0, {duration:.1f} Lyapunov times)"
-    )
-    axis.legend()
-    _finish_figure(figure, output_path, show=show, dpi=dpi)
-
-
-def plot_uncontrolled_state_path(
-    trajectory: np.ndarray,
-    output_path: Path | None,
-    *,
-    show: bool = False,
-    dpi: int = 160,
-) -> None:
-    """Plot the zero-control Lorenz coordinates as separate time series."""
-    uncontrolled = np.asarray(trajectory, dtype=np.float64)
-    if uncontrolled.ndim != 2 or uncontrolled.shape[1] != 3:
-        raise ValueError("The uncontrolled trajectory must have shape (n, 3)")
-
-    times = _lyapunov_time_axis(uncontrolled.shape[0])
-    colors = ("tab:blue", "tab:orange", "tab:green")
-    figure, axis = plt.subplots(figsize=(14, 5.5))
-    for coordinate, (label, color) in enumerate(zip(("x", "y", "z"), colors)):
-        axis.plot(
-            times,
-            uncontrolled[:, coordinate],
-            color=color,
-            linewidth=0.8,
-            label=label,
-        )
-    axis.axhline(0.0, color="black", linestyle="--", linewidth=1.0)
-    axis.set_xlim(0.0, float(times[-1]))
-    axis.set_xlabel("Lyapunov times (t / τ)")
-    axis.set_ylabel("State")
-    axis.set_title("Uncontrolled Lorenz reference: same initial condition with u = 0")
-    axis.grid(alpha=0.25)
-    axis.legend(loc="upper right", ncol=3)
-    _finish_figure(figure, output_path, show=show, dpi=dpi)
-
-
 def plot_evaluation_diagnostics(
     evaluation: Mapping[str, Sequence[Any]],
     output_dir: Path | None,
@@ -543,37 +475,6 @@ def plot_evaluation_diagnostics(
         dpi=dpi,
     )
 
-    control_figure, control_axis = plt.subplots(figsize=(14, 4))
-    for trial, (control_times, control_values, color) in enumerate(
-        zip(control_time_axes, control_arrays, trajectory_colors), start=1
-    ):
-        control_axis.step(
-            control_times,
-            control_values,
-            where="post",
-            color=color,
-            linewidth=0.75,
-            alpha=0.75,
-            label=f"Trial {trial}" if label_trials else None,
-        )
-    control_axis.set_xlim(0.0, display_time_end)
-    control_axis.set_xlabel("Lyapunov times (t / τ)")
-    control_axis.set_ylabel("Control u")
-    control_axis.set_title("Greedy control signals across evaluation trials")
-    control_axis.grid(alpha=0.25)
-    if label_trials:
-        control_axis.legend(
-            loc="upper right",
-            ncol=len(control_arrays),
-            title="Evaluation trial",
-        )
-    _finish_figure(
-        control_figure,
-        output_path("evaluation_control_signal.png"),
-        show=show,
-        dpi=dpi,
-    )
-
 def plot_q_table_diagnostics(
     q_table: np.ndarray,
     actions: Sequence[float],
@@ -704,8 +605,8 @@ def main() -> None:
         )
 
     required = {
-        "history", "checkpoints", "evaluation", "uncontrolled_trajectory",
-        "q_table", "actions", "state_bounds", "reference_state", "final_epsilon",
+        "history", "checkpoints", "evaluation", "q_table", "actions",
+        "state_bounds", "reference_state", "final_epsilon",
     }
     missing = required.difference(run)
     if missing:
@@ -714,7 +615,6 @@ def main() -> None:
     history = run["history"]
     checkpoint_history = run["checkpoints"]
     evaluation = run["evaluation"]
-    uncontrolled_trajectory = np.asarray(run["uncontrolled_trajectory"])
 
     output_dir = None if args.no_save else args.output_dir.expanduser().resolve()
     plot_training_diagnostics(
@@ -728,20 +628,6 @@ def main() -> None:
         None
         if output_dir is None
         else output_dir / "checkpoint_evaluations.png",
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_uncontrolled_lorenz(
-        uncontrolled_trajectory,
-        None if output_dir is None else output_dir / "evaluation_uncontrolled_lorenz.png",
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_uncontrolled_state_path(
-        uncontrolled_trajectory,
-        None
-        if output_dir is None
-        else output_dir / "evaluation_uncontrolled_state_path.png",
         show=args.show,
         dpi=args.dpi,
     )

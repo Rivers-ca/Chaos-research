@@ -41,7 +41,6 @@ class QLearningRegressionTests(unittest.TestCase):
                 "history",
                 "checkpoints",
                 "evaluation",
-                "uncontrolled_trajectory",
                 "q_table",
                 "actions",
                 "state_bounds",
@@ -53,7 +52,6 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(len(run["checkpoints"]["mean_control_efforts"]), 2)
         self.assertEqual(len(run["history"]["episode_rewards"]), 3)
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
-        self.assertEqual(np.asarray(run["uncontrolled_trajectory"]).shape, (3, 3))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.pkl"
             qlearning.save_q_learning_run(run, path)
