@@ -53,6 +53,15 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(run["checkpoints"]["episodes"], [2, 3])
         self.assertEqual(len(run["checkpoints"]["mean_control_efforts"]), 2)
         self.assertEqual(len(run["history"]["episode_rewards"]), 3)
+        self.assertEqual(run["history"]["sampled_episodes"], [1, 2, 3])
+        self.assertEqual(len(run["history"]["sampled_trajectories"]), 3)
+        self.assertEqual(len(run["history"]["sampled_control_values"]), 3)
+        for trajectory, controls in zip(
+            run["history"]["sampled_trajectories"],
+            run["history"]["sampled_control_values"],
+        ):
+            self.assertEqual(trajectory.shape[0], controls.shape[0] + 1)
+            self.assertEqual(trajectory.shape[1], 3)
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.pkl"
@@ -67,6 +76,18 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(qlearning.lyapunov_times_to_steps(lyapunov_times), steps)
         with self.assertRaisesRegex(ValueError, "nonnegative"):
             qlearning.steps_to_lyapunov_times(-1)
+
+    def test_uncontrolled_integration_uses_zero_control_euler_steps(self) -> None:
+        initial_state = np.array([0.0, 1.0, 1.05])
+        trajectory = qlearning.integrate_uncontrolled_lorenz(initial_state, 4)
+
+        self.assertEqual(trajectory.shape, (5, 3))
+        np.testing.assert_array_equal(trajectory[0], initial_state)
+        np.testing.assert_allclose(
+            trajectory[1],
+            qlearning.LorenzEnvEuler._euler_step(initial_state, 0.0),
+        )
+        self.assertTrue(np.isfinite(trajectory).all())
 
     def test_default_state_cost_uses_phi(self) -> None:
         self.assertAlmostEqual(
