@@ -10,7 +10,7 @@ class TrainingHistory(TypedDict):
     diverged: List[bool]
     first_target_steps: List[Optional[int]]
     target_steps: List[int]
-    rolling_mean_rewards: List[float]
+    average_rewards: List[float]
 
 import numpy as np
 
@@ -46,8 +46,7 @@ def default_state_cost_fn(x: float) -> float:
     return float(phi(float(x)))
 
 
-def is_at_target_fixed_point(state: StateVector) -> bool:
-    """Return whether a Lorenz state is within the target's tolerance radius."""
+def fixed_point_check(state: StateVector) -> bool:
     state_array = np.asarray(state, dtype=np.float64)
     return bool(
         state_array.shape == (3,)
@@ -59,7 +58,7 @@ def is_at_target_fixed_point(state: StateVector) -> bool:
 @dataclass(frozen=True)
 class ExperimentDefaults:
     episodes: int = EPISODES
-    eval_episodes: int = 5
+    eval_episodes: int = 20
     evaluation_interval: int = 50
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
@@ -72,7 +71,7 @@ class ExperimentDefaults:
     evaluation_seed: Optional[int] = 0
     evaluation_ic_perturbation: float = 0.01
 
-    training_lyapunov_times: float = 50.0
+    training_lyapunov_times: float = 100.0
     evaluation_lyapunov_times: float = 100.0
     control_cost: float = LAMBDA
     regularized: bool = True
@@ -83,7 +82,7 @@ class ExperimentDefaults:
     divergence_threshold: float = np.inf
     state_cost_fn: Callable[[float], float] = default_state_cost_fn
 
-    state_bins: Tuple[int, int, int] = (15, 15, 15)
+    state_bins: Tuple[int, int, int] = (20, 20, 20)
     learning_rate: float = 0.01
     discount_factor: float = 0.01
     epsilon: float = 0.99
@@ -108,7 +107,6 @@ RUN_OUTPUT_PATH = Path(__file__).with_name("q_learning_run.pkl")
 
 
 def _positive_int(value: Any, name: str, *, optional: bool = False) -> Optional[int]:
-    """Validate integer configuration without silently accepting bools or floats."""
     if optional and value is None:
         return None
     suffix = " when supplied" if optional else ""
@@ -273,7 +271,6 @@ class LorenzEnvEuler:
         state_is_finite = bool(np.isfinite(self.state).all())
         diverged = not state_is_finite
         if state_is_finite and np.isfinite(self.divergence_threshold):
-            # Scale before taking the norm to prevent overflow for large finite states.
             state_scale = float(np.max(np.abs(self.state)))
             if state_scale == 0.0:
                 diverged = False
@@ -457,7 +454,7 @@ def _validate_discrete_pair(env: LorenzEnvEuler, agent: QLearningAgent) -> None:
         raise ValueError("agent.n_actions must match the environment's action bins")
 
 
-def _rolling_mean(values: List[float], window: int = 100) -> List[float]:
+def rolling_average(values: List[float], window: int = 100) -> List[float]:
     return [float(np.mean(values[max(0, end - window):end]))
             for end in range(1, len(values) + 1)]
 
@@ -491,7 +488,7 @@ def _run_episode(
         current_state = next_state
         total_reward += reward
         steps += 1
-        if is_at_target_fixed_point(next_state):
+        if fixed_point_check(next_state):
             if first_target_step is None:
                 first_target_step = steps
             target_steps += 1
@@ -572,7 +569,7 @@ def train_q_learning(
         "diverged": diverged,
         "first_target_steps": first_target_steps,
         "target_steps": target_steps,
-        "rolling_mean_rewards": _rolling_mean(episode_rewards),
+        "average_rewards": rolling_average(episode_rewards),
     }
 
 def evaluate_q_learning(
