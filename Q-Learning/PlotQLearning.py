@@ -93,7 +93,7 @@ def plot_training_diagnostics(
 ) -> None:
     """Plot learning progress returned by ``train_q_learning``."""
     rewards = np.asarray(history["episode_rewards"], dtype=np.float64)
-    rolling_rewards = np.asarray(history["rolling_mean_rewards"], dtype=np.float64)
+    rolling_rewards = np.asarray(history["average_rewards"], dtype=np.float64)
     lengths = np.asarray(history["episode_lengths"], dtype=np.int64)
     epsilons = np.asarray(history["epsilons"], dtype=np.float64)
     diverged = np.asarray(history["diverged"], dtype=bool)
@@ -101,7 +101,7 @@ def plot_training_diagnostics(
     if rewards.ndim != 1 or episode_count == 0:
         raise ValueError("Training history must contain at least one episode")
     for name, values in (
-        ("rolling_mean_rewards", rolling_rewards),
+        ("average_rewards", rolling_rewards),
         ("episode_lengths", lengths),
         ("epsilons", epsilons),
         ("diverged", diverged),
