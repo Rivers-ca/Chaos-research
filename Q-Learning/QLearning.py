@@ -3,6 +3,8 @@ from pathlib import Path
 import pickle
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, TypedDict, cast
 
+import numpy as np
+
 class TrainingHistory(TypedDict):
     episode_rewards: List[float]
     episode_lengths: List[int]
@@ -11,8 +13,10 @@ class TrainingHistory(TypedDict):
     first_target_steps: List[Optional[int]]
     target_steps: List[int]
     average_rewards: List[float]
-
-import numpy as np
+    rolling_mean_rewards: List[float]
+    sampled_episodes: List[int]
+    sampled_trajectories: List[np.ndarray]
+    sampled_control_values: List[np.ndarray]
 
 ArrayLike = Union[Sequence[Any], np.ndarray]
 StateVector = Union[Sequence[float], np.ndarray]
@@ -63,6 +67,7 @@ class ExperimentDefaults:
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
     print_every: int = 50
+    training_plot_samples: int = 20
 
     ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
     training_ic_seed: Optional[int] = 0
@@ -308,6 +313,28 @@ class LorenzEnvEuler:
         return state + np.array([dx, dy, dz]) * DT
 
 
+def integrate_uncontrolled_lorenz(
+    initial_state: StateVector,
+    number_of_steps: int,
+) -> np.ndarray:
+    steps = cast(int, _positive_int(number_of_steps, "number_of_steps"))
+    state = _finite_array(
+        initial_state,
+        (3,),
+        "initial_state must contain three finite values",
+    ).copy()
+    trajectory = np.empty((steps + 1, 3), dtype=np.float64)
+    trajectory[0] = state
+    for step in range(steps):
+        state = LorenzEnvEuler._euler_step(state, 0.0)
+        if not np.isfinite(state).all():
+            raise FloatingPointError(
+                f"Uncontrolled Lorenz integration became non-finite at step {step + 1}"
+            )
+        trajectory[step + 1] = state
+    return trajectory
+
+
 class StateDiscretizer:
     def __init__(
         self,
@@ -466,9 +493,11 @@ def _run_episode(
     *,
     training: bool,
     x0: Optional[np.ndarray] = None,
+    record_rollout: bool = False,
 ) -> _EpisodeResult:
     current_state = env.reset(x0=x0)
-    states = [] if training else [current_state.copy()]
+    keep_rollout = not training or record_rollout
+    states = [current_state.copy()] if keep_rollout else []
     actions: List[int] = []
     controls: List[float] = []
     total_reward, steps, diverged = 0.0, 0, False
@@ -481,7 +510,7 @@ def _run_episode(
         next_state, reward, done, info = env.step(action)
         if training:
             agent.update(current_state, action, reward, next_state, done)
-        else:
+        if keep_rollout:
             actions.append(action)
             controls.append(float(env.actions[action]))
             states.append(next_state.copy())
@@ -509,11 +538,15 @@ def train_q_learning(
     print_every: int = EXPERIMENT_DEFAULTS.print_every,
     evaluation_interval: Optional[int] = None,
     on_evaluation: Optional[Callable[[int], None]] = None,
+    rollout_samples: int = EXPERIMENT_DEFAULTS.training_plot_samples,
 ) -> TrainingHistory:
     _validate_discrete_pair(env, agent)
     num_episodes = cast(int, _positive_int(num_episodes, "num_episodes"))
     max_steps = _positive_int(max_steps, "max_steps", optional=True)
     print_every = cast(int, _positive_int(print_every, "print_every"))
+    rollout_samples = cast(
+        int, _positive_int(rollout_samples, "rollout_samples")
+    )
     evaluation_interval = _positive_int(
         evaluation_interval, "evaluation_interval", optional=True
     )
@@ -528,9 +561,23 @@ def train_q_learning(
     diverged: List[bool] = []
     first_target_steps: List[Optional[int]] = []
     target_steps: List[int] = []
+    sample_count = min(rollout_samples, num_episodes)
+    sampled_episode_set = set(
+        np.rint(np.linspace(1, num_episodes, sample_count)).astype(int).tolist()
+    )
+    sampled_episodes: List[int] = []
+    sampled_trajectories: List[np.ndarray] = []
+    sampled_control_values: List[np.ndarray] = []
 
     for episode in range(1, num_episodes + 1):
-        result = _run_episode(env, agent, max_steps, training=True)
+        record_rollout = episode in sampled_episode_set
+        result = _run_episode(
+            env,
+            agent,
+            max_steps,
+            training=True,
+            record_rollout=record_rollout,
+        )
         agent.decay_epsilon()
         episode_rewards.append(result.reward)
         episode_lengths.append(result.length)
@@ -538,6 +585,10 @@ def train_q_learning(
         diverged.append(result.diverged)
         first_target_steps.append(result.first_target_step)
         target_steps.append(result.target_steps)
+        if record_rollout:
+            sampled_episodes.append(episode)
+            sampled_trajectories.append(result.trajectory)
+            sampled_control_values.append(result.controls)
 
         if result.first_target_step is not None:
             print(
@@ -562,6 +613,7 @@ def train_q_learning(
         ):
             on_evaluation(episode)
 
+    average_rewards = rolling_average(episode_rewards)
     return {
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
@@ -569,7 +621,11 @@ def train_q_learning(
         "diverged": diverged,
         "first_target_steps": first_target_steps,
         "target_steps": target_steps,
-        "average_rewards": rolling_average(episode_rewards),
+        "average_rewards": average_rewards,
+        "rolling_mean_rewards": average_rewards,
+        "sampled_episodes": sampled_episodes,
+        "sampled_trajectories": sampled_trajectories,
+        "sampled_control_values": sampled_control_values,
     }
 
 def evaluate_q_learning(
@@ -645,6 +701,7 @@ def train_q_learning_with_evaluation(
     evaluation_max_steps: Optional[int] = None,
     evaluation_initial_states: Optional[Sequence[Sequence[float]]] = None,
     print_every: int = EXPERIMENT_DEFAULTS.print_every,
+    rollout_samples: int = EXPERIMENT_DEFAULTS.training_plot_samples,
 ) -> Tuple[TrainingHistory, Dict[str, List[Union[int, float]]], EvaluationResults]:
     checkpoint_episodes: List[int] = []
     evaluations: List[EvaluationResults] = []
@@ -669,6 +726,7 @@ def train_q_learning_with_evaluation(
         print_every=print_every,
         evaluation_interval=evaluation_interval,
         on_evaluation=run_evaluation,
+        rollout_samples=rollout_samples,
     )
 
     rewards = [np.asarray(result["episode_rewards"], dtype=float) for result in evaluations]
@@ -712,6 +770,7 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         evaluation_max_steps=settings.eval_max_steps,
         evaluation_initial_states=evaluation_starts.tolist(),
         print_every=settings.print_every,
+        rollout_samples=settings.training_plot_samples,
     )
     return {
         "history": history,
