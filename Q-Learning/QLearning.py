@@ -317,13 +317,6 @@ def integrate_uncontrolled_lorenz(
     initial_state: StateVector,
     number_of_steps: int,
 ) -> np.ndarray:
-    """Integrate the uncontrolled Lorenz equations with ``u = 0``.
-
-    The update uses the same forward-Euler method and ``DT`` as the controlled
-    environment, making controlled and uncontrolled plots directly comparable.
-    The returned array includes the initial condition and therefore contains
-    ``number_of_steps + 1`` states.
-    """
     steps = cast(int, _positive_int(number_of_steps, "number_of_steps"))
     state = _finite_array(
         initial_state,
