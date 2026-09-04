@@ -89,7 +89,7 @@ class ExperimentDefaults:
 
     state_bins: Tuple[int, int, int] = (20, 20, 20)
     learning_rate: float = 0.01
-    discount_factor: float = 0.01
+    discount_factor: float = 0.99
     epsilon: float = 0.99
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.0
