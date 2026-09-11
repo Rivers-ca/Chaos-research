@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Mapping, Sequence
@@ -24,7 +26,8 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
-# Additional legacy plots are archived in q_learning_plots/Saved_Plots.  The
+# Each run is written to its own parameter-labeled folder in
+# q_learning_plots/Saved_Plots, next to the legacy plots archived there.  The
 # standalone control-correction filename is still generated below so an old
 # image cannot be mistaken for output from the currently loaded run.
 
@@ -54,6 +57,73 @@ def _load_qlearning(path: str | Path = QLEARNING_PATH) -> ModuleType:
 
 qlearning = _load_qlearning()
 steps_to_lyapunov_times = qlearning.steps_to_lyapunov_times
+
+_EPISODE_HISTORY_KEYS = (
+    "episode_rewards",
+    "episode_lengths",
+    "epsilons",
+    "diverged",
+    "first_target_steps",
+    "target_steps",
+    "average_rewards",
+    "rolling_mean_rewards",
+)
+_SAMPLED_HISTORY_KEYS = (
+    "sampled_episodes",
+    "sampled_trajectories",
+    "sampled_control_values",
+)
+_CHECKPOINT_SERIES_KEYS = (
+    "episodes",
+    "mean_rewards",
+    "reward_standard_deviations",
+    "divergence_rates",
+    "mean_control_efforts",
+)
+
+
+def _run_directory(
+    root: Path, settings: Mapping[str, Any], run_time: datetime
+) -> Path:
+    """Name a per-run archive folder after the parameters that define the run."""
+    state_bins = "x".join(str(count) for count in np.atleast_1d(settings["state_bins"]))
+    label = (
+        f"{run_time:%Y%m%d-%H%M%S}"
+        f"_ep{settings['episodes']}"
+        f"_lr{settings['learning_rate']:g}"
+        f"_gamma{settings['discount_factor']:g}"
+        f"_eps{settings['epsilon']:g}-{settings['epsilon_decay']:g}"
+        f"_bins{state_bins}"
+        f"_actions{settings['action_bins']}"
+    )
+    return root / "Saved_Plots" / label
+
+
+def _history_through_episode(
+    history: Mapping[str, Sequence[Any]], episode: int
+) -> dict[str, Sequence[Any]]:
+    """Return the portion of training history available at one checkpoint."""
+    snapshot = dict(history)
+    for key in _EPISODE_HISTORY_KEYS:
+        if key in history:
+            snapshot[key] = history[key][:episode]
+
+    sampled_episodes = np.asarray(history["sampled_episodes"], dtype=np.int64)
+    sampled_count = int(np.count_nonzero(sampled_episodes <= episode))
+    for key in _SAMPLED_HISTORY_KEYS:
+        snapshot[key] = history[key][:sampled_count]
+    return snapshot
+
+
+def _checkpoint_history_through_index(
+    checkpoints: Mapping[str, Sequence[Any]], checkpoint_index: int
+) -> dict[str, Sequence[Any]]:
+    """Return scalar checkpoint metrics through the selected checkpoint."""
+    count = checkpoint_index + 1
+    return {
+        key: checkpoints[key][:count]
+        for key in _CHECKPOINT_SERIES_KEYS
+    }
 
 
 def _lyapunov_time_axis(number_of_steps: int) -> np.ndarray:
@@ -1174,6 +1244,69 @@ def plot_q_table_action_map(
     _finish_figure(figure, output_path, show=show, dpi=dpi)
 
 
+def plot_run_figures(
+    history: Mapping[str, Sequence[Any]],
+    checkpoints: Mapping[str, Sequence[Any]],
+    evaluation: Mapping[str, Sequence[Any]],
+    q_table: np.ndarray,
+    actions: Sequence[float],
+    state_bounds: Sequence[Sequence[float]],
+    reference_state: Sequence[float],
+    output_dir: Path | None,
+    *,
+    action_map_z_bin: int | None = None,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Render the complete, existing plot set for one training checkpoint."""
+
+    def output_path(filename: str) -> Path | None:
+        return None if output_dir is None else output_dir / filename
+
+    plot_training_diagnostics(
+        history,
+        output_path("training_diagnostics.png"),
+        show=show,
+        dpi=dpi,
+    )
+    plot_training_rollouts(history, output_dir, show=show, dpi=dpi)
+    plot_target_acquisition(
+        history,
+        output_path("target_acquisition.png"),
+        show=show,
+        dpi=dpi,
+    )
+    plot_checkpoint_evaluations(
+        checkpoints,
+        output_path("checkpoint_evaluations.png"),
+        show=show,
+        dpi=dpi,
+    )
+    plot_evaluation_diagnostics(evaluation, output_dir, show=show, dpi=dpi)
+    plot_uncontrolled_evaluation_reference(
+        evaluation, output_dir, show=show, dpi=dpi
+    )
+    plot_q_table_diagnostics(
+        q_table,
+        actions,
+        state_bounds,
+        reference_state,
+        output_path("q_table_diagnostics.png"),
+        show=show,
+        dpi=dpi,
+    )
+    plot_q_table_action_map(
+        q_table,
+        actions,
+        state_bounds,
+        reference_state,
+        output_path("q_table_action_map.png"),
+        z_index=action_map_z_bin,
+        show=show,
+        dpi=dpi,
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1186,6 +1319,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=Path(__file__).with_name("q_learning_plots"),
+        help="Plot root; each run is written to Saved_Plots/<parameter label> inside it",
     )
     parser.add_argument("--dpi", type=int, default=160)
     parser.add_argument(
@@ -1234,64 +1368,77 @@ def main() -> None:
             f"--action-map-z-bin must be in [0, {q_table_shape[2] - 1}]"
         )
 
-    output_dir = None if args.no_save else args.output_dir.expanduser().resolve()
-    plot_training_diagnostics(
+    settings = run.get("settings")
+    if settings is None:
+        settings = qlearning.EXPERIMENT_DEFAULTS.as_dict()
+        print("Run data predates parameter recording; assuming QLearning.py defaults.")
+
+    output_dir = None
+    if not args.no_save:
+        output_dir = _run_directory(
+            args.output_dir.expanduser().resolve(),
+            settings,
+            datetime.fromtimestamp(args.run_data.stat().st_mtime),
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "parameters.json").write_text(
+            json.dumps(settings, indent=2, sort_keys=True, default=str) + "\n"
+        )
+
+    # Preserve the final-run plots at the top level.
+    plot_run_figures(
         history,
-        None if output_dir is None else output_dir / "training_diagnostics.png",
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_training_rollouts(
-        history,
-        output_dir,
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_target_acquisition(
-        history,
-        None if output_dir is None else output_dir / "target_acquisition.png",
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_checkpoint_evaluations(
         checkpoint_history,
-        None
-        if output_dir is None
-        else output_dir / "checkpoint_evaluations.png",
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_evaluation_diagnostics(
         evaluation,
-        output_dir,
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_uncontrolled_evaluation_reference(
-        evaluation,
-        output_dir,
-        show=args.show,
-        dpi=args.dpi,
-    )
-    plot_q_table_diagnostics(
         run["q_table"],
         run["actions"],
         run["state_bounds"],
         run["reference_state"],
-        None if output_dir is None else output_dir / "q_table_diagnostics.png",
+        output_dir,
+        action_map_z_bin=args.action_map_z_bin,
         show=args.show,
         dpi=args.dpi,
     )
-    plot_q_table_action_map(
-        run["q_table"],
-        run["actions"],
-        run["state_bounds"],
-        run["reference_state"],
-        None if output_dir is None else output_dir / "q_table_action_map.png",
-        z_index=args.action_map_z_bin,
-        show=args.show,
-        dpi=args.dpi,
-    )
+
+    checkpoint_episodes = list(checkpoint_history["episodes"])
+    checkpoint_evaluations = checkpoint_history.get("evaluations")
+    checkpoint_q_tables = checkpoint_history.get("q_tables")
+    if checkpoint_evaluations is None or checkpoint_q_tables is None:
+        print(
+            "Run data predates checkpoint snapshots; generated final plots only. "
+            "Run QLearning.py again to create plots every evaluation interval."
+        )
+    elif not (
+        len(checkpoint_evaluations)
+        == len(checkpoint_q_tables)
+        == len(checkpoint_episodes)
+    ):
+        parser.error(
+            "checkpoint evaluations, Q-tables, and episode numbers must have "
+            "matching lengths"
+        )
+    else:
+        for checkpoint_index, episode in enumerate(checkpoint_episodes):
+            snapshot_dir = (
+                None if output_dir is None else output_dir / f"episode_{episode:04d}"
+            )
+            plot_run_figures(
+                _history_through_episode(history, episode),
+                _checkpoint_history_through_index(
+                    checkpoint_history, checkpoint_index
+                ),
+                checkpoint_evaluations[checkpoint_index],
+                checkpoint_q_tables[checkpoint_index],
+                run["actions"],
+                run["state_bounds"],
+                run["reference_state"],
+                snapshot_dir,
+                action_map_z_bin=args.action_map_z_bin,
+                show=args.show,
+                dpi=args.dpi,
+            )
+            if snapshot_dir is not None:
+                print(f"Saved episode {episode} learning snapshot to {snapshot_dir}")
 
     final_window = min(50, len(history["episode_rewards"]))
     final_rewards = np.asarray(history["episode_rewards"][-final_window:], dtype=float)
@@ -1305,6 +1452,8 @@ def main() -> None:
         f"{len(evaluation['diverged'])}"
     )
     print(f"Nonzero Q-table entries: {np.count_nonzero(q_table)}/{q_table.size}")
+    if output_dir is not None:
+        print(f"Run saved to {output_dir}")
 
     if args.show:
         plt.show()
