@@ -49,6 +49,7 @@ class QLearningRegressionTests(unittest.TestCase):
                 "reference_state",
                 "final_epsilon",
                 "settings",
+                "created_at",
             }.issubset(run)
         )
         self.assertEqual(run["checkpoints"]["episodes"], [2, 3])

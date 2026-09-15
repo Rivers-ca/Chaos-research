@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields
+from datetime import datetime
 import gzip
 from pathlib import Path
 import pickle
@@ -806,6 +807,7 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         "reference_state": reference_state,
         "final_epsilon": agent.epsilon,
         "settings": settings.as_dict(),
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
 
 

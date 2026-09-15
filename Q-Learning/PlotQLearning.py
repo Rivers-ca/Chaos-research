@@ -22,6 +22,7 @@ if "MPLBACKEND" not in os.environ and "--show" not in sys.argv:
     matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import animation
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -97,6 +98,21 @@ def _run_directory(
         f"_actions{settings['action_bins']}"
     )
     return root / "Saved_Plots" / label
+
+
+def _run_time(run: Mapping[str, Any], run_data_path: Path) -> datetime:
+    """Use stable run metadata, falling back for archives created before it existed."""
+    created_at = run.get("created_at")
+    if created_at is None:
+        return datetime.fromtimestamp(run_data_path.stat().st_mtime)
+    if not isinstance(created_at, str):
+        raise ValueError("run data 'created_at' must be an ISO-8601 string")
+    try:
+        return datetime.fromisoformat(created_at)
+    except ValueError as error:
+        raise ValueError(
+            "run data 'created_at' must be an ISO-8601 timestamp"
+        ) from error
 
 
 def _history_through_episode(
@@ -639,6 +655,194 @@ def plot_checkpoint_evaluations(
     axes[2].grid(alpha=0.25)
 
     _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
+def save_learning_progress_gif(
+    checkpoints: Mapping[str, Sequence[Any]],
+    state_bounds: Sequence[Sequence[float]],
+    target_state: Sequence[float],
+    output_path: Path,
+    *,
+    fps: float = 2.0,
+    dpi: int = 100,
+    max_trajectory_points: int = 2_000,
+) -> None:
+    """Animate representative greedy trajectories across training checkpoints."""
+    episodes = np.asarray(checkpoints["episodes"], dtype=np.int64)
+    mean_rewards = np.asarray(checkpoints["mean_rewards"], dtype=np.float64)
+    reward_stds = np.asarray(
+        checkpoints["reward_standard_deviations"], dtype=np.float64
+    )
+    divergence_rates = np.asarray(
+        checkpoints["divergence_rates"], dtype=np.float64
+    )
+    evaluations = checkpoints.get("evaluations")
+
+    if episodes.ndim != 1 or episodes.size == 0:
+        raise ValueError("Checkpoint history must contain at least one evaluation")
+    if evaluations is None:
+        raise ValueError("Checkpoint history does not contain evaluation snapshots")
+    if len(evaluations) != episodes.size:
+        raise ValueError(
+            "Checkpoint evaluations must contain one snapshot per episode"
+        )
+    for name, values in (
+        ("mean_rewards", mean_rewards),
+        ("reward_standard_deviations", reward_stds),
+        ("divergence_rates", divergence_rates),
+    ):
+        if values.shape != episodes.shape or not np.isfinite(values).all():
+            raise ValueError(
+                f"checkpoints[{name!r}] must contain {episodes.size} finite values"
+            )
+    if not np.isfinite(fps) or fps <= 0.0:
+        raise ValueError("fps must be finite and positive")
+    if dpi < 1:
+        raise ValueError("dpi must be at least 1")
+    if max_trajectory_points < 2:
+        raise ValueError("max_trajectory_points must be at least 2")
+    if not animation.PillowWriter.isAvailable():
+        raise RuntimeError("Saving learning_progress.gif requires Pillow")
+
+    bounds = np.asarray(state_bounds, dtype=np.float64)
+    target = np.asarray(target_state, dtype=np.float64)
+    if bounds.shape != (3, 2) or not np.isfinite(bounds).all():
+        raise ValueError("state_bounds must have shape (3, 2) with finite values")
+    if target.shape != (3,) or not np.isfinite(target).all():
+        raise ValueError("target_state must contain three finite values")
+
+    trajectories: list[np.ndarray] = []
+    for checkpoint_index, evaluation in enumerate(evaluations):
+        checkpoint_trajectories = evaluation.get("trajectories", [])
+        if not checkpoint_trajectories:
+            raise ValueError(
+                f"Checkpoint {checkpoint_index + 1} contains no evaluation trajectory"
+            )
+        trajectory = np.asarray(checkpoint_trajectories[0], dtype=np.float64)
+        if trajectory.ndim != 2 or trajectory.shape[1] != 3 or trajectory.shape[0] < 2:
+            raise ValueError("Each GIF trajectory must have shape (n, 3), n >= 2")
+        finite_rows = np.isfinite(trajectory).all(axis=1)
+        trajectory = trajectory[finite_rows]
+        if trajectory.shape[0] < 2:
+            raise ValueError("Each GIF trajectory must contain two finite states")
+        if trajectory.shape[0] > max_trajectory_points:
+            sample_indices = np.linspace(
+                0,
+                trajectory.shape[0] - 1,
+                max_trajectory_points,
+                dtype=np.int64,
+            )
+            trajectory = trajectory[sample_indices]
+        trajectories.append(trajectory)
+
+    reward_lower = mean_rewards - reward_stds
+    reward_upper = mean_rewards + reward_stds
+    reward_min = float(np.min(reward_lower))
+    reward_max = float(np.max(reward_upper))
+    reward_padding = max(0.05 * (reward_max - reward_min), 1e-6)
+    final_episode = max(int(episodes[-1]), 1)
+
+    figure = plt.figure(figsize=(12, 7))
+    grid = figure.add_gridspec(2, 2, width_ratios=(1.45, 1.0), hspace=0.34)
+    trajectory_axis = figure.add_subplot(grid[:, 0], projection="3d")
+    reward_axis = figure.add_subplot(grid[0, 1])
+    divergence_axis = figure.add_subplot(grid[1, 1], sharex=reward_axis)
+    frame_colors = plt.cm.viridis(np.linspace(0.12, 0.9, episodes.size))
+
+    def draw_frame(frame_index: int) -> tuple[Any, ...]:
+        trajectory_axis.clear()
+        reward_axis.clear()
+        divergence_axis.clear()
+
+        trajectory = trajectories[frame_index]
+        color = frame_colors[frame_index]
+        trajectory_axis.plot(
+            trajectory[:, 0],
+            trajectory[:, 1],
+            trajectory[:, 2],
+            color=color,
+            linewidth=0.9,
+            alpha=0.9,
+        )
+        trajectory_axis.scatter(
+            *trajectory[0], color="black", s=32, marker="o", label="Start"
+        )
+        trajectory_axis.scatter(
+            *trajectory[-1], color="crimson", s=48, marker="X", label="Agent"
+        )
+        trajectory_axis.scatter(
+            *target, color="gold", edgecolor="black", s=100, marker="*", label="Target"
+        )
+        trajectory_axis.set_xlim(*bounds[0])
+        trajectory_axis.set_ylim(*bounds[1])
+        trajectory_axis.set_zlim(*bounds[2])
+        trajectory_axis.set_xlabel("x")
+        trajectory_axis.set_ylabel("y")
+        trajectory_axis.set_zlabel("z")
+        trajectory_axis.set_title(
+            f"Greedy agent trajectory after episode {int(episodes[frame_index])}"
+        )
+        trajectory_axis.legend(loc="upper left", fontsize=8)
+
+        visible = slice(0, frame_index + 1)
+        reward_axis.plot(
+            episodes[visible],
+            mean_rewards[visible],
+            marker="o",
+            color="tab:blue",
+        )
+        reward_axis.fill_between(
+            episodes[visible],
+            reward_lower[visible],
+            reward_upper[visible],
+            color="tab:blue",
+            alpha=0.18,
+        )
+        reward_axis.set_xlim(0, final_episode)
+        reward_axis.set_ylim(
+            reward_min - reward_padding, reward_max + reward_padding
+        )
+        reward_axis.set_ylabel("Mean reward")
+        reward_axis.set_title("Greedy evaluation reward")
+        reward_axis.grid(alpha=0.25)
+
+        divergence_axis.plot(
+            episodes[visible],
+            divergence_rates[visible],
+            marker="o",
+            color="tab:red",
+        )
+        divergence_axis.set_xlim(0, final_episode)
+        divergence_axis.set_ylim(-0.02, 1.02)
+        divergence_axis.set_xlabel("Completed training episode")
+        divergence_axis.set_ylabel("Divergence rate")
+        divergence_axis.set_title("Evaluation stability")
+        divergence_axis.grid(alpha=0.25)
+
+        figure.suptitle(
+            "Q-learning agent progress\n"
+            f"Checkpoint {frame_index + 1}/{episodes.size} | "
+            f"reward {mean_rewards[frame_index]:.4f} | "
+            f"divergence {divergence_rates[frame_index]:.1%}",
+            fontsize=14,
+        )
+        return ()
+
+    movie = animation.FuncAnimation(
+        figure,
+        draw_frame,
+        frames=episodes.size,
+        interval=1_000.0 / fps,
+        repeat=True,
+        blit=False,
+        cache_frame_data=False,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        movie.save(output_path, writer=animation.PillowWriter(fps=fps), dpi=dpi)
+    finally:
+        plt.close(figure)
+    print(f"Saved {output_path}")
 
 
 def plot_evaluation_diagnostics(
@@ -1323,6 +1527,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dpi", type=int, default=160)
     parser.add_argument(
+        "--gif-fps",
+        type=float,
+        default=2.0,
+        help="Frames per second for learning_progress.gif (default: 2)",
+    )
+    parser.add_argument(
+        "--no-gif",
+        action="store_true",
+        help="Skip learning_progress.gif while retaining the static plots",
+    )
+    parser.add_argument(
         "--action-map-z-bin",
         type=int,
         default=None,
@@ -1330,7 +1545,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--show", action="store_true", help="Display figures interactively")
     parser.add_argument(
-        "--no-save", action="store_true", help="Do not write PNG files"
+        "--no-save", action="store_true", help="Do not write plot or GIF files"
     )
     return parser
 
@@ -1341,6 +1556,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.dpi < 1:
         parser.error("--dpi must be at least 1")
+    if not np.isfinite(args.gif_fps) or args.gif_fps <= 0.0:
+        parser.error("--gif-fps must be finite and positive")
     try:
         run = qlearning.load_q_learning_run(args.run_data)
     except FileNotFoundError:
@@ -1378,14 +1595,14 @@ def main() -> None:
         output_dir = _run_directory(
             args.output_dir.expanduser().resolve(),
             settings,
-            datetime.fromtimestamp(args.run_data.stat().st_mtime),
+            _run_time(run, args.run_data),
         )
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "parameters.json").write_text(
             json.dumps(settings, indent=2, sort_keys=True, default=str) + "\n"
         )
 
-    # Preserve the final-run plots at the top level.
+    # Render the final-run plots at the root of the labeled run archive.
     plot_run_figures(
         history,
         checkpoint_history,
@@ -1439,6 +1656,16 @@ def main() -> None:
             )
             if snapshot_dir is not None:
                 print(f"Saved episode {episode} learning snapshot to {snapshot_dir}")
+
+        if output_dir is not None and not args.no_gif:
+            save_learning_progress_gif(
+                checkpoint_history,
+                run["state_bounds"],
+                qlearning.TARGET_FIXED_POINT,
+                output_dir / "learning_progress.gif",
+                fps=args.gif_fps,
+                dpi=args.dpi,
+            )
 
     final_window = min(50, len(history["episode_rewards"]))
     final_rewards = np.asarray(history["episode_rewards"][-final_window:], dtype=float)
