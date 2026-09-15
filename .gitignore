@@ -22,6 +22,10 @@ checkpoints/
 runs/
 outputs/
 
+# The Q-learning run archive is stored compressed so it stays below GitHub's
+# per-file size limit. Keep accidental uncompressed copies out of commits.
+/Q-Learning/q_learning_run.pkl
+
 # Experiment logging
 wandb/
 lightning_logs/

@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import gzip
 from pathlib import Path
 import pickle
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, TypedDict, cast
@@ -63,7 +64,7 @@ def fixed_point_check(state: StateVector) -> bool:
 class ExperimentDefaults:
     episodes: int = EPISODES
     eval_episodes: int = 20
-    evaluation_interval: int = 50
+    evaluation_interval: int = 100
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
     print_every: int = 50
@@ -89,10 +90,16 @@ class ExperimentDefaults:
 
     state_bins: Tuple[int, int, int] = (20, 20, 20)
     learning_rate: float = 0.01
-    discount_factor: float = 0.01
+    discount_factor: float = 0.99
     epsilon: float = 0.99
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.0
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return the settings in a picklable, JSON-friendly form."""
+        recorded = {field.name: getattr(self, field.name) for field in fields(self)}
+        recorded["state_cost_fn"] = self.state_cost_fn.__name__
+        return recorded
 
     def make_training_initial_state_sampler(self) -> Callable[[], np.ndarray]:
         return make_random_initial_state_sampler(
@@ -108,7 +115,7 @@ class ExperimentDefaults:
         )
 
 EXPERIMENT_DEFAULTS = ExperimentDefaults()
-RUN_OUTPUT_PATH = Path(__file__).with_name("q_learning_run.pkl")
+RUN_OUTPUT_PATH = Path(__file__).with_name("q_learning_run.pkl.gz")
 
 
 def _positive_int(value: Any, name: str, *, optional: bool = False) -> Optional[int]:
@@ -565,6 +572,13 @@ def train_q_learning(
     sampled_episode_set = set(
         np.rint(np.linspace(1, num_episodes, sample_count)).astype(int).tolist()
     )
+    # Retain a rollout at every evaluation checkpoint so PlotQLearning.py can
+    # render a representative trajectory for each learning snapshot.
+    if evaluation_interval is not None:
+        sampled_episode_set.update(
+            range(evaluation_interval, num_episodes + 1, evaluation_interval)
+        )
+        sampled_episode_set.add(num_episodes)
     sampled_episodes: List[int] = []
     sampled_trajectories: List[np.ndarray] = []
     sampled_control_values: List[np.ndarray] = []
@@ -702,9 +716,11 @@ def train_q_learning_with_evaluation(
     evaluation_initial_states: Optional[Sequence[Sequence[float]]] = None,
     print_every: int = EXPERIMENT_DEFAULTS.print_every,
     rollout_samples: int = EXPERIMENT_DEFAULTS.training_plot_samples,
-) -> Tuple[TrainingHistory, Dict[str, List[Union[int, float]]], EvaluationResults]:
+) -> Tuple[TrainingHistory, Dict[str, Any], EvaluationResults]:
     checkpoint_episodes: List[int] = []
     evaluations: List[EvaluationResults] = []
+    q_tables: List[np.ndarray] = []
+    epsilons: List[float] = []
 
     def run_evaluation(episode: int) -> None:
         checkpoint_episodes.append(episode)
@@ -717,6 +733,8 @@ def train_q_learning_with_evaluation(
                 initial_states=evaluation_initial_states,
             )
         )
+        q_tables.append(agent.q_table.copy())
+        epsilons.append(float(agent.epsilon))
 
     history = train_q_learning(
         training_env,
@@ -739,6 +757,11 @@ def train_q_learning_with_evaluation(
             _mean_control_effort(result, evaluation_env.u_ref)
             for result in evaluations
         ],
+        # Full checkpoint data lets PlotQLearning.py reproduce the same plots
+        # throughout training instead of showing only the final policy.
+        "evaluations": evaluations,
+        "q_tables": q_tables,
+        "epsilons": epsilons,
     }
     return history, checkpoints, evaluations[-1]
 
@@ -782,19 +805,23 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         "state_bins": agent.discretizer.bins,
         "reference_state": reference_state,
         "final_epsilon": agent.epsilon,
+        "settings": settings.as_dict(),
     }
 
 
 def save_q_learning_run(run: Dict[str, Any], path: Union[str, Path] = RUN_OUTPUT_PATH) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("wb") as output_file:
+    opener = gzip.open if output_path.suffix == ".gz" else Path.open
+    with opener(output_path, "wb") as output_file:
         pickle.dump(run, output_file, protocol=pickle.HIGHEST_PROTOCOL)
     return output_path
 
 
 def load_q_learning_run(path: Union[str, Path] = RUN_OUTPUT_PATH) -> Dict[str, Any]:
-    with Path(path).open("rb") as input_file:
+    input_path = Path(path)
+    opener = gzip.open if input_path.suffix == ".gz" else Path.open
+    with opener(input_path, "rb") as input_file:
         run = pickle.load(input_file)
     if not isinstance(run, dict):
         raise ValueError("Q-learning run file must contain a result dictionary")

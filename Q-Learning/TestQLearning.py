@@ -48,10 +48,14 @@ class QLearningRegressionTests(unittest.TestCase):
                 "state_bounds",
                 "reference_state",
                 "final_epsilon",
+                "settings",
             }.issubset(run)
         )
         self.assertEqual(run["checkpoints"]["episodes"], [2, 3])
         self.assertEqual(len(run["checkpoints"]["mean_control_efforts"]), 2)
+        self.assertEqual(len(run["checkpoints"]["evaluations"]), 2)
+        self.assertEqual(len(run["checkpoints"]["q_tables"]), 2)
+        self.assertEqual(len(run["checkpoints"]["epsilons"]), 2)
         self.assertEqual(len(run["history"]["episode_rewards"]), 3)
         self.assertEqual(run["history"]["sampled_episodes"], [1, 2, 3])
         self.assertEqual(len(run["history"]["sampled_trajectories"]), 3)
@@ -64,10 +68,17 @@ class QLearningRegressionTests(unittest.TestCase):
             self.assertEqual(trajectory.shape[1], 3)
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "run.pkl"
-            qlearning.save_q_learning_run(run, path)
-            loaded = qlearning.load_q_learning_run(path)
-        np.testing.assert_array_equal(loaded["q_table"], run["q_table"])
+            compressed_path = Path(directory) / "run.pkl.gz"
+            qlearning.save_q_learning_run(run, compressed_path)
+            compressed = qlearning.load_q_learning_run(compressed_path)
+
+            legacy_path = Path(directory) / "run.pkl"
+            qlearning.save_q_learning_run(run, legacy_path)
+            legacy = qlearning.load_q_learning_run(legacy_path)
+
+        self.assertEqual(qlearning.RUN_OUTPUT_PATH.suffixes[-2:], [".pkl", ".gz"])
+        np.testing.assert_array_equal(compressed["q_table"], run["q_table"])
+        np.testing.assert_array_equal(legacy["q_table"], run["q_table"])
 
     def test_lyapunov_time_conversions_are_consistent(self) -> None:
         steps = 123
@@ -339,6 +350,12 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(len(history["rolling_mean_rewards"]), 5)
         self.assertEqual(checkpoints["episodes"], [2, 4, 5])
         self.assertEqual(len(checkpoints["mean_rewards"]), 3)
+        self.assertEqual(len(checkpoints["evaluations"]), 3)
+        self.assertEqual(len(checkpoints["q_tables"]), 3)
+        self.assertEqual(len(checkpoints["epsilons"]), 3)
+        self.assertFalse(
+            np.shares_memory(checkpoints["q_tables"][0], agent.q_table)
+        )
         self.assertAlmostEqual(agent.epsilon, 0.8 * 0.5**5)
         actual_starts = np.asarray(
             [trajectory[0] for trajectory in final_evaluation["trajectories"]]
@@ -367,6 +384,7 @@ class QLearningRegressionTests(unittest.TestCase):
             on_evaluation=lambda episode: evaluations.append(
                 (episode, agent.epsilon)
             ),
+            rollout_samples=1,
         )
 
         self.assertEqual(
@@ -374,6 +392,7 @@ class QLearningRegressionTests(unittest.TestCase):
             [(2, 0.8 * 0.5**2), (4, 0.8 * 0.5**4), (5, 0.8 * 0.5**5)],
         )
         self.assertEqual(len(history["episode_rewards"]), 5)
+        self.assertEqual(history["sampled_episodes"], [1, 2, 4, 5])
 
     def test_training_interval_requires_callback(self) -> None:
         env = qlearning.LorenzEnvEuler(
