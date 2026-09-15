@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -21,6 +26,51 @@ SPEC.loader.exec_module(plot_qlearning)
 
 
 class PlotQLearningRegressionTests(unittest.TestCase):
+    def test_cloud_placeholder_is_rejected_before_loading(self) -> None:
+        with (
+            patch.object(plot_qlearning.sys, "platform", "darwin"),
+            patch.object(Path, "stat", return_value=SimpleNamespace(st_flags=0x40000000)),
+        ):
+            with self.assertRaisesRegex(ValueError, "Download Now or Keep Downloaded"):
+                plot_qlearning._require_local_run_data(Path("cloud-run.pkl.gz"))
+
+    def test_local_run_data_is_accepted(self) -> None:
+        with (
+            patch.object(plot_qlearning.sys, "platform", "darwin"),
+            patch.object(Path, "stat", return_value=SimpleNamespace(st_flags=0)),
+        ):
+            plot_qlearning._require_local_run_data(Path("local-run.pkl.gz"))
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS font-discovery regression")
+    def test_cli_starts_with_a_fresh_font_cache(self) -> None:
+        environment = os.environ.copy()
+        environment.pop("MPL_IGNORE_SYSTEM_FONTS", None)
+        with tempfile.TemporaryDirectory() as directory:
+            environment["MPLCONFIGDIR"] = directory
+            # Fail immediately if startup attempts the blocking system queries.
+            script = """
+import runpy
+import subprocess
+import sys
+original_check_output = subprocess.check_output
+def check_output(command, *args, **kwargs):
+    if command[0] in {"system_profiler", "fc-list"}:
+        raise RuntimeError("Startup queried system fonts")
+    return original_check_output(command, *args, **kwargs)
+subprocess.check_output = check_output
+sys.argv = [sys.argv[1], "--help"]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(MODULE_PATH.resolve())],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--run-data", result.stdout)
+
     def test_run_directory_uses_parameter_label(self) -> None:
         settings = plot_qlearning.qlearning.EXPERIMENT_DEFAULTS.as_dict()
         path = plot_qlearning._run_directory(

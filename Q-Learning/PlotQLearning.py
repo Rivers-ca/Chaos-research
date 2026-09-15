@@ -13,6 +13,15 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Mapping, Sequence
 
+if __name__ == "__main__":
+    print("Initializing plotting libraries", flush=True)
+
+# macOS font discovery invokes system_profiler without a timeout. It can hang
+# while building a fresh cache; these plots only need Matplotlib's bundled fonts.
+# Respect an explicit user setting (an empty value enables system font discovery).
+if sys.platform == "darwin":
+    os.environ.setdefault("MPL_IGNORE_SYSTEM_FONTS", "1")
+
 import matplotlib
 
 # Saving plots is the default workflow.  On headless macOS/Python setups the
@@ -115,6 +124,16 @@ def _run_time(run: Mapping[str, Any], run_data_path: Path) -> datetime:
         ) from error
 
 
+def _require_local_run_data(path: Path) -> None:
+    """Avoid blocking on reads of macOS cloud placeholders."""
+    if sys.platform == "darwin" and path.stat().st_flags & 0x40000000:  # SF_DATALESS
+        raise ValueError(
+            f"run data is stored only in iCloud: {path}; "
+            "select Download Now or Keep Downloaded for this file in Finder, "
+            "then rerun PlotQLearning.py"
+        )
+
+
 def _history_through_episode(
     history: Mapping[str, Sequence[Any]], episode: int
 ) -> dict[str, Sequence[Any]]:
@@ -164,7 +183,7 @@ def _finish_figure(
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        print(f"Saved {output_path}")
+        print(f"Saved {output_path}", flush=True)
     if show:
         figure.show()
     else:
@@ -838,11 +857,12 @@ def save_learning_progress_gif(
         cache_frame_data=False,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Rendering {episodes.size} GIF frames to {output_path}", flush=True)
     try:
         movie.save(output_path, writer=animation.PillowWriter(fps=fps), dpi=dpi)
     finally:
         plt.close(figure)
-    print(f"Saved {output_path}")
+    print(f"Saved {output_path}", flush=True)
 
 
 def plot_evaluation_diagnostics(
@@ -1558,12 +1578,16 @@ def main() -> None:
         parser.error("--dpi must be at least 1")
     if not np.isfinite(args.gif_fps) or args.gif_fps <= 0.0:
         parser.error("--gif-fps must be finite and positive")
+    print(f"Loading run data from {args.run_data}", flush=True)
     try:
+        _require_local_run_data(args.run_data)
         run = qlearning.load_q_learning_run(args.run_data)
     except FileNotFoundError:
         parser.error(
             f"run data not found: {args.run_data}; run QLearning.py first"
         )
+    except ValueError as error:
+        parser.error(str(error))
 
     required = {
         "history", "checkpoints", "evaluation", "q_table", "actions",
@@ -1603,6 +1627,7 @@ def main() -> None:
         )
 
     # Render the final-run plots at the root of the labeled run archive.
+    print("Rendering final-run plots", flush=True)
     plot_run_figures(
         history,
         checkpoint_history,
@@ -1636,6 +1661,11 @@ def main() -> None:
         )
     else:
         for checkpoint_index, episode in enumerate(checkpoint_episodes):
+            print(
+                f"Rendering checkpoint {checkpoint_index + 1}/"
+                f"{len(checkpoint_episodes)} (episode {episode})",
+                flush=True,
+            )
             snapshot_dir = (
                 None if output_dir is None else output_dir / f"episode_{episode:04d}"
             )
