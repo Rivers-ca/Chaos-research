@@ -126,6 +126,43 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                 self.assertEqual(movie.format, "GIF")
                 self.assertEqual(movie.n_frames, 2)
 
+    def test_evaluation_animation_is_smooth_and_uses_forcing_colors(self) -> None:
+        trajectory = np.array(
+            [
+                [0.0, 1.0, 1.05],
+                [1.0, 2.0, 3.0],
+                [2.0, 3.0, 4.0],
+                [1.0, 4.0, 5.0],
+                [0.0, 2.0, 6.0],
+            ]
+        )
+        evaluation = {
+            "trajectories": [trajectory],
+            "control_values": [np.array([0.0, 20.0, -40.0, 60.0])],
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "evaluation_trajectory_forcing.gif"
+            plot_qlearning.save_evaluation_trajectory_animation(
+                evaluation,
+                ((-30.0, 30.0), (-30.0, 30.0), (0.0, 60.0)),
+                plot_qlearning.qlearning.TARGET_FIXED_POINT,
+                output_path,
+                fps=4.0,
+                duration=1.0,
+                dpi=40,
+            )
+
+            self.assertTrue(output_path.is_file())
+            with Image.open(output_path) as movie:
+                self.assertEqual(movie.format, "GIF")
+                self.assertEqual(movie.n_frames, 4)
+                movie.seek(0)
+                first_frame = np.asarray(movie.convert("RGB"))
+                movie.seek(3)
+                last_frame = np.asarray(movie.convert("RGB"))
+                self.assertFalse(np.array_equal(first_frame, last_frame))
+
 
 if __name__ == "__main__":
     unittest.main()

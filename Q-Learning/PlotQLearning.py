@@ -32,9 +32,10 @@ if "MPLBACKEND" not in os.environ and "--show" not in sys.argv:
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
-from matplotlib.colors import Normalize
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 # Each run is written to its own parameter-labeled folder in
 # q_learning_plots/Saved_Plots, next to the legacy plots archived there.  The
@@ -865,6 +866,186 @@ def save_learning_progress_gif(
     print(f"Saved {output_path}", flush=True)
 
 
+def save_evaluation_trajectory_animation(
+    evaluation: Mapping[str, Sequence[Any]],
+    state_bounds: Sequence[Sequence[float]],
+    target_state: Sequence[float],
+    output_path: Path,
+    *,
+    episode_index: int = 0,
+    forcing_scale: float = qlearning.U_REF,
+    fps: float = 25.0,
+    duration: float = 20.0,
+    dpi: int = 90,
+) -> None:
+    """Animate one greedy evaluation rollout, colored by forcing magnitude."""
+    trajectories = evaluation.get("trajectories", [])
+    controls = evaluation.get("control_values", [])
+    if len(trajectories) == 0:
+        raise ValueError("Evaluation results contain no trajectories")
+    if not isinstance(episode_index, (int, np.integer)) or isinstance(
+        episode_index, (bool, np.bool_)
+    ):
+        raise TypeError("episode_index must be an integer")
+    if episode_index < 0 or episode_index >= len(trajectories):
+        raise ValueError(
+            f"episode_index must be in [0, {len(trajectories) - 1}]"
+        )
+    if len(controls) != len(trajectories):
+        raise ValueError(
+            "Evaluation results must contain one control sequence per trajectory"
+        )
+    if not np.isfinite(forcing_scale) or forcing_scale <= 0.0:
+        raise ValueError("forcing_scale must be finite and positive")
+    if not np.isfinite(fps) or fps <= 0.0:
+        raise ValueError("fps must be finite and positive")
+    if not np.isfinite(duration) or duration <= 0.0:
+        raise ValueError("duration must be finite and positive")
+    if dpi < 1:
+        raise ValueError("dpi must be at least 1")
+    if not animation.PillowWriter.isAvailable():
+        raise RuntimeError("Saving the evaluation animation requires Pillow")
+
+    trajectory = np.asarray(trajectories[episode_index], dtype=np.float64)
+    control_values = np.asarray(controls[episode_index], dtype=np.float64)
+    bounds = np.asarray(state_bounds, dtype=np.float64)
+    target = np.asarray(target_state, dtype=np.float64)
+    if (
+        trajectory.ndim != 2
+        or trajectory.shape[1] != 3
+        or trajectory.shape[0] < 2
+        or not np.isfinite(trajectory).all()
+    ):
+        raise ValueError("The selected trajectory must have shape (n, 3), n >= 2")
+    if (
+        control_values.ndim != 1
+        or control_values.size != trajectory.shape[0] - 1
+        or not np.isfinite(control_values).all()
+    ):
+        raise ValueError("The selected episode must have one finite control per transition")
+    if bounds.shape != (3, 2) or not np.isfinite(bounds).all():
+        raise ValueError("state_bounds must have shape (3, 2) with finite values")
+    if target.shape != (3,) or not np.isfinite(target).all():
+        raise ValueError("target_state must contain three finite values")
+
+    segments = np.stack((trajectory[:-1], trajectory[1:]), axis=1)
+    forcing_magnitudes = np.abs(control_values)
+    frame_count = min(
+        segments.shape[0],
+        max(2, int(np.rint(fps * duration))),
+    )
+    frame_ends = np.unique(
+        np.rint(np.linspace(1, segments.shape[0], frame_count)).astype(np.int64)
+    )
+    times = _lyapunov_time_axis(trajectory.shape[0])
+
+    color_map = LinearSegmentedColormap.from_list(
+        "forcing_magnitude",
+        ("#1565c0", "#8da9d6", "#ef9a9a", "#b2182b"),
+    )
+    color_norm = Normalize(vmin=0.0, vmax=forcing_scale, clip=True)
+
+    figure = plt.figure(figsize=(8.6, 7.2))
+    axis = figure.add_subplot(111, projection="3d")
+    axis.plot(
+        trajectory[:, 0],
+        trajectory[:, 1],
+        trajectory[:, 2],
+        color="0.72",
+        linewidth=0.45,
+        alpha=0.28,
+        label="Full evaluation path",
+    )
+    colored_path = Line3DCollection(
+        segments[:1], cmap=color_map, norm=color_norm, linewidth=2.1, alpha=0.96
+    )
+    colored_path.set_array(forcing_magnitudes[:1])
+    axis.add_collection3d(colored_path)
+    position_marker = axis.scatter(
+        *trajectory[0],
+        color=color_map(color_norm(forcing_magnitudes[0])),
+        edgecolor="white",
+        linewidth=0.9,
+        s=62,
+        depthshade=False,
+        label="Current position",
+        zorder=5,
+    )
+    axis.scatter(
+        *target,
+        color="gold",
+        edgecolor="black",
+        linewidth=0.7,
+        marker="*",
+        s=145,
+        label="Target fixed point",
+        zorder=4,
+    )
+    axis.set_xlim(*bounds[0])
+    axis.set_ylim(*bounds[1])
+    axis.set_zlim(*bounds[2])
+    axis.set_xlabel("x")
+    axis.set_ylabel("y")
+    axis.set_zlabel("z")
+    axis.set_title(f"Greedy evaluation episode {episode_index + 1}", pad=18)
+    axis.view_init(elev=24, azim=-58)
+    axis.legend(loc="upper left", fontsize=8)
+
+    color_bar = figure.colorbar(
+        plt.cm.ScalarMappable(norm=color_norm, cmap=color_map),
+        ax=axis,
+        pad=0.08,
+        shrink=0.72,
+    )
+    color_bar.set_label("Forcing magnitude |u| (blue = off, red = strongest)")
+    status = figure.text(0.5, 0.025, "", ha="center", fontsize=10)
+    figure.suptitle(
+        "Q-learning motion along the Lorenz attractor",
+        fontsize=15,
+        y=0.97,
+    )
+    figure.subplots_adjust(left=0.02, right=0.88, bottom=0.08, top=0.90)
+
+    def draw_frame(frame_index: int) -> tuple[Any, ...]:
+        end = int(frame_ends[frame_index])
+        colored_path.set_segments(segments[:end])
+        colored_path.set_array(forcing_magnitudes[:end])
+        current_state = trajectory[end]
+        position_marker._offsets3d = (
+            np.asarray([current_state[0]]),
+            np.asarray([current_state[1]]),
+            np.asarray([current_state[2]]),
+        )
+        current_forcing = forcing_magnitudes[end - 1]
+        position_marker.set_facecolor(color_map(color_norm(current_forcing)))
+        status.set_text(
+            f"t / τ = {times[end]:.2f}   |   "
+            f"u = {control_values[end - 1]:+.1f}   |   "
+            f"|u| = {current_forcing:.1f}"
+        )
+        return colored_path, position_marker, status
+
+    movie = animation.FuncAnimation(
+        figure,
+        draw_frame,
+        frames=frame_ends.size,
+        interval=1_000.0 / fps,
+        repeat=True,
+        blit=False,
+        cache_frame_data=False,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(
+        f"Rendering {frame_ends.size} evaluation-animation frames to {output_path}",
+        flush=True,
+    )
+    try:
+        movie.save(output_path, writer=animation.PillowWriter(fps=fps), dpi=dpi)
+    finally:
+        plt.close(figure)
+    print(f"Saved {output_path}", flush=True)
+
+
 def plot_evaluation_diagnostics(
     evaluation: Mapping[str, Sequence[Any]],
     output_dir: Path | None,
@@ -1555,7 +1736,31 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-gif",
         action="store_true",
-        help="Skip learning_progress.gif while retaining the static plots",
+        help="Skip GIF animations while retaining the static plots",
+    )
+    parser.add_argument(
+        "--evaluation-episode",
+        type=int,
+        default=1,
+        help="One-based final evaluation episode to animate (default: 1)",
+    )
+    parser.add_argument(
+        "--evaluation-animation-fps",
+        type=float,
+        default=25.0,
+        help="Frames per second for evaluation_trajectory_forcing.gif (default: 25)",
+    )
+    parser.add_argument(
+        "--evaluation-animation-seconds",
+        type=float,
+        default=20.0,
+        help="Approximate duration of the evaluation animation (default: 20)",
+    )
+    parser.add_argument(
+        "--evaluation-animation-dpi",
+        type=int,
+        default=90,
+        help="Resolution of the evaluation animation (default: 90 dpi)",
     )
     parser.add_argument(
         "--action-map-z-bin",
@@ -1578,6 +1783,20 @@ def main() -> None:
         parser.error("--dpi must be at least 1")
     if not np.isfinite(args.gif_fps) or args.gif_fps <= 0.0:
         parser.error("--gif-fps must be finite and positive")
+    if args.evaluation_episode < 1:
+        parser.error("--evaluation-episode must be at least 1")
+    if (
+        not np.isfinite(args.evaluation_animation_fps)
+        or args.evaluation_animation_fps <= 0.0
+    ):
+        parser.error("--evaluation-animation-fps must be finite and positive")
+    if (
+        not np.isfinite(args.evaluation_animation_seconds)
+        or args.evaluation_animation_seconds <= 0.0
+    ):
+        parser.error("--evaluation-animation-seconds must be finite and positive")
+    if args.evaluation_animation_dpi < 1:
+        parser.error("--evaluation-animation-dpi must be at least 1")
     print(f"Loading run data from {args.run_data}", flush=True)
     try:
         _require_local_run_data(args.run_data)
@@ -1600,6 +1819,13 @@ def main() -> None:
     history = run["history"]
     checkpoint_history = run["checkpoints"]
     evaluation = run["evaluation"]
+    evaluation_count = len(evaluation.get("trajectories", []))
+    if evaluation_count == 0:
+        parser.error("evaluation contains no trajectories to animate")
+    if args.evaluation_episode > evaluation_count:
+        parser.error(
+            f"--evaluation-episode must be in [1, {evaluation_count}]"
+        )
 
     q_table_shape = np.asarray(run["q_table"]).shape
     if args.action_map_z_bin is not None and len(q_table_shape) == 4 and not (
@@ -1641,6 +1867,18 @@ def main() -> None:
         show=args.show,
         dpi=args.dpi,
     )
+    if output_dir is not None and not args.no_gif:
+        save_evaluation_trajectory_animation(
+            evaluation,
+            run["state_bounds"],
+            qlearning.TARGET_FIXED_POINT,
+            output_dir / "evaluation_trajectory_forcing.gif",
+            episode_index=args.evaluation_episode - 1,
+            forcing_scale=float(settings.get("u_ref", qlearning.U_REF)),
+            fps=args.evaluation_animation_fps,
+            duration=args.evaluation_animation_seconds,
+            dpi=args.evaluation_animation_dpi,
+        )
 
     checkpoint_episodes = list(checkpoint_history["episodes"])
     checkpoint_evaluations = checkpoint_history.get("evaluations")
