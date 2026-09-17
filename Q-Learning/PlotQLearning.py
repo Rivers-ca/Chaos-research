@@ -32,7 +32,7 @@ if "MPLBACKEND" not in os.environ and "--show" not in sys.argv:
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
-from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.colors import LinearSegmentedColormap, Normalize, TwoSlopeNorm
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -940,10 +940,14 @@ def save_evaluation_trajectory_animation(
     times = _lyapunov_time_axis(trajectory.shape[0])
 
     color_map = LinearSegmentedColormap.from_list(
-        "forcing_magnitude",
-        ("#1565c0", "#8da9d6", "#ef9a9a", "#b2182b"),
+        "signed_forcing",
+        ("#174ea6", "#8da9d6", "#f7f7f7", "#ef9a9a", "#b2182b"),
     )
-    color_norm = Normalize(vmin=0.0, vmax=forcing_scale, clip=True)
+    color_norm = TwoSlopeNorm(
+        vmin=-forcing_scale,
+        vcenter=0.0,
+        vmax=forcing_scale,
+    )
 
     figure = plt.figure(figsize=(8.6, 7.2))
     axis = figure.add_subplot(111, projection="3d")
@@ -959,11 +963,11 @@ def save_evaluation_trajectory_animation(
     colored_path = Line3DCollection(
         segments[:1], cmap=color_map, norm=color_norm, linewidth=2.1, alpha=0.96
     )
-    colored_path.set_array(forcing_magnitudes[:1])
+    colored_path.set_array(control_values[:1])
     axis.add_collection3d(colored_path)
     position_marker = axis.scatter(
         *trajectory[0],
-        color=color_map(color_norm(forcing_magnitudes[0])),
+        color=color_map(color_norm(control_values[0])),
         edgecolor="white",
         linewidth=0.9,
         s=62,
@@ -997,7 +1001,7 @@ def save_evaluation_trajectory_animation(
         pad=0.08,
         shrink=0.72,
     )
-    color_bar.set_label("Forcing magnitude |u| (blue = off, red = strongest)")
+    color_bar.set_label("Signed forcing u (blue = negative, white = zero, red = positive)")
     status = figure.text(0.5, 0.025, "", ha="center", fontsize=10)
     figure.suptitle(
         "Q-learning motion along the Lorenz attractor",
@@ -1009,19 +1013,19 @@ def save_evaluation_trajectory_animation(
     def draw_frame(frame_index: int) -> tuple[Any, ...]:
         end = int(frame_ends[frame_index])
         colored_path.set_segments(segments[:end])
-        colored_path.set_array(forcing_magnitudes[:end])
+        colored_path.set_array(control_values[:end])
         current_state = trajectory[end]
         position_marker._offsets3d = (
             np.asarray([current_state[0]]),
             np.asarray([current_state[1]]),
             np.asarray([current_state[2]]),
         )
-        current_forcing = forcing_magnitudes[end - 1]
+        current_forcing = control_values[end - 1]
         position_marker.set_facecolor(color_map(color_norm(current_forcing)))
         status.set_text(
             f"t / τ = {times[end]:.2f}   |   "
-            f"u = {control_values[end - 1]:+.1f}   |   "
-            f"|u| = {current_forcing:.1f}"
+            f"u = {current_forcing:+.1f}   |   "
+            f"|u| = {forcing_magnitudes[end - 1]:.1f}"
         )
         return colored_path, position_marker, status
 
