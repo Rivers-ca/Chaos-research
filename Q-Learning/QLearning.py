@@ -29,7 +29,7 @@ B = 8 / 3
 DT = 0.01
 LYAPUNOV_EXP = 0.9056
 EPS = 2.0
-U_REF = 60.0
+U_REF = 10.0
 LAMBDA = 0.007
 EPISODES = 1000
 
@@ -59,6 +59,7 @@ def fixed_point_check(state: StateVector) -> bool:
         and np.isfinite(state_array).all()
         and np.linalg.norm(state_array - TARGET_FIXED_POINT) <= FIXED_POINT_TOLERANCE
     )
+
 
 
 @dataclass(frozen=True)
