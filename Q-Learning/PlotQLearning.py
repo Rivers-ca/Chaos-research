@@ -941,7 +941,7 @@ def save_evaluation_trajectory_animation(
 
     color_map = LinearSegmentedColormap.from_list(
         "signed_forcing",
-        ("#174ea6", "#8da9d6", "#f7f7f7", "#ef9a9a", "#b2182b"),
+        ("#174ea6", "#8da9d6", "#8f8f8f", "#ef9a9a", "#b2182b"),
     )
     color_norm = TwoSlopeNorm(
         vmin=-forcing_scale,
@@ -1001,7 +1001,7 @@ def save_evaluation_trajectory_animation(
         pad=0.08,
         shrink=0.72,
     )
-    color_bar.set_label("Signed forcing u (blue = negative, white = zero, red = positive)")
+    color_bar.set_label("Signed forcing u (blue = negative, grey = zero, red = positive)")
     status = figure.text(0.5, 0.025, "", ha="center", fontsize=10)
     figure.suptitle(
         "Q-learning motion along the Lorenz attractor",
@@ -1043,8 +1043,24 @@ def save_evaluation_trajectory_animation(
         f"Rendering {frame_ends.size} evaluation-animation frames to {output_path}",
         flush=True,
     )
+    progress_interval = max(1, frame_ends.size // 10)
+
+    def report_progress(current_frame: int, total_frames: int) -> None:
+        completed = current_frame + 1
+        if completed % progress_interval == 0 or completed == total_frames:
+            print(
+                f"Evaluation animation: {completed}/{total_frames} frames "
+                f"({completed / total_frames:.0%})",
+                flush=True,
+            )
+
     try:
-        movie.save(output_path, writer=animation.PillowWriter(fps=fps), dpi=dpi)
+        movie.save(
+            output_path,
+            writer=animation.PillowWriter(fps=fps),
+            dpi=dpi,
+            progress_callback=report_progress,
+        )
     finally:
         plt.close(figure)
     print(f"Saved {output_path}", flush=True)

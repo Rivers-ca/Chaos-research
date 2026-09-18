@@ -29,7 +29,7 @@ B = 8 / 3
 DT = 0.01
 LYAPUNOV_EXP = 0.9056
 EPS = 2.0
-U_REF = 60.0
+U_REF = 10.0
 LAMBDA = 0.007
 EPISODES = 1000
 
@@ -61,6 +61,7 @@ def fixed_point_check(state: StateVector) -> bool:
     )
 
 
+
 @dataclass(frozen=True)
 class ExperimentDefaults:
     episodes: int = EPISODES
@@ -90,7 +91,7 @@ class ExperimentDefaults:
     state_cost_fn: Callable[[float], float] = default_state_cost_fn
 
     state_bins: Tuple[int, int, int] = (20, 20, 20)
-    learning_rate: float = 0.01
+    learning_rate: float = 0.1
     discount_factor: float = 0.99
     epsilon: float = 0.99
     epsilon_decay: float = 0.995

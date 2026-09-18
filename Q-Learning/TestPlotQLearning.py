@@ -80,7 +80,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertEqual(path.parent, Path("plots/Saved_Plots"))
         self.assertEqual(
             path.name,
-            "20260903-193446_ep1000_lr0.01_gamma0.99_"
+            "20260903-193446_ep1000_lr0.1_gamma0.99_"
             "eps0.99-0.995_bins20x20x20_actions9",
         )
 
