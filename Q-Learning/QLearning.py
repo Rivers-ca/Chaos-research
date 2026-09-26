@@ -38,7 +38,13 @@ TARGET_FIXED_POINT = np.array(
     [-FIXED_POINT_COORDINATE, -FIXED_POINT_COORDINATE, RAYLEIGH - 1],
     dtype=np.float64,
 )
+POSITIVE_FIXED_POINT = np.array(
+    [FIXED_POINT_COORDINATE, FIXED_POINT_COORDINATE, RAYLEIGH - 1],
+    dtype=np.float64,
+)
 FIXED_POINT_TOLERANCE = 2.0
+POSITIVE_LOBE_PENALTY = 1.0
+POTENTIAL_DISTANCE_SCALE = float(np.linalg.norm(TARGET_FIXED_POINT))
 
 DEFAULT_STATE_BOUNDS: Tuple[Tuple[float, float], ...] = (
     (-30.0, 30.0), (-30.0, 30.0), (0.0, 60.0))
@@ -52,14 +58,66 @@ def default_state_cost_fn(x: float) -> float:
     return float(phi(float(x)))
 
 
-def fixed_point_check(state: StateVector) -> bool:
+def _fixed_point_check(state: StateVector, fixed_point: np.ndarray) -> bool:
     state_array = np.asarray(state, dtype=np.float64)
     return bool(
         state_array.shape == (3,)
         and np.isfinite(state_array).all()
-        and np.linalg.norm(state_array - TARGET_FIXED_POINT) <= FIXED_POINT_TOLERANCE
+        and np.linalg.norm(state_array - fixed_point) <= FIXED_POINT_TOLERANCE
     )
 
+
+def fixed_point_check(state: StateVector) -> bool:
+    """Return whether ``state`` is within tolerance of the negative target."""
+    return _fixed_point_check(state, TARGET_FIXED_POINT)
+
+
+def positive_fixed_point_check(state: StateVector) -> bool:
+    """Return whether ``state`` is within tolerance of the unwanted positive lobe."""
+    return _fixed_point_check(state, POSITIVE_FIXED_POINT)
+
+
+def lobe_state_cost(
+    state: StateVector,
+    state_cost_fn: Callable[[float], float] = default_state_cost_fn,
+) -> float:
+    """Shape the state cost to favor the negative fixed point only."""
+    if fixed_point_check(state):
+        return 0.0
+    if positive_fixed_point_check(state):
+        return POSITIVE_LOBE_PENALTY
+    state_array = np.asarray(state, dtype=np.float64)
+    return float(state_cost_fn(float(state_array[0])))
+
+
+def negative_target_potential(state: StateVector) -> float:
+    """Normalized potential that increases as a state approaches the target."""
+    state_array = _finite_array(
+        state, (3,), "state must contain three finite values"
+    )
+    scaled_difference = (state_array - TARGET_FIXED_POINT) / POTENTIAL_DISTANCE_SCALE
+    if float(np.max(np.abs(scaled_difference))) > 1e150:
+        return -1.0
+    distance = float(np.linalg.norm(scaled_difference))
+    return -distance / (1.0 + distance)
+
+
+def potential_shaped_reward(
+    reward: float,
+    state: StateVector,
+    next_state: StateVector,
+    discount_factor: float,
+    shaping_weight: float,
+    *,
+    done: bool,
+) -> float:
+    """Apply policy-invariant potential shaping toward the negative target."""
+    next_potential = 0.0 if done else negative_target_potential(next_state)
+    return float(
+        reward
+        + shaping_weight
+        * (discount_factor * next_potential - negative_target_potential(state))
+    )
 
 
 @dataclass(frozen=True)
@@ -91,11 +149,13 @@ class ExperimentDefaults:
     state_cost_fn: Callable[[float], float] = default_state_cost_fn
 
     state_bins: Tuple[int, int, int] = (20, 20, 20)
-    learning_rate: float = 0.01
-    discount_factor: float = 0.99
+    learning_rate: float = 0.005
+    discount_factor: float = 0.999
     epsilon: float = 0.99
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.0
+    trace_lambda: float = 0.95
+    potential_shaping_weight: float = 0.005
 
     def as_dict(self) -> Dict[str, Any]:
         """Return the settings in a picklable, JSON-friendly form."""
@@ -200,11 +260,14 @@ class LorenzEnvEuler:
                           else settings.evaluation_lyapunov_times)
         divergence_threshold = settings.divergence_threshold
         u_ref = settings.u_ref
+        potential_shaping_weight = settings.potential_shaping_weight
         numeric_rules = (
             (np.isfinite(alpha) and alpha >= 0.0, "alpha must be finite and nonnegative"),
             (np.isfinite(lyapunov_times) and lyapunov_times > 0.0,
              "lyapunov_times must be finite and positive"),
             (np.isfinite(u_ref) and u_ref > 0.0, "u_ref must be finite and positive"),
+            (np.isfinite(potential_shaping_weight) and potential_shaping_weight >= 0.0,
+             "potential_shaping_weight must be finite and nonnegative"),
             (not np.isnan(divergence_threshold) and divergence_threshold > 0.0,
              "divergence_threshold must be positive"),
         )
@@ -221,6 +284,7 @@ class LorenzEnvEuler:
         self.divergence_threshold = divergence_threshold
         self.regularized = settings.regularized if controlled else False
         self.u_ref = u_ref
+        self.potential_shaping_weight = float(potential_shaping_weight)
 
         self.action_type = "discrete" if controlled else "continuous"
         self.action_low, self.action_high = settings.action_low, settings.action_high
@@ -255,7 +319,7 @@ class LorenzEnvEuler:
             initial_state, (3,), "The initial Lorenz state must be finite and contain x, y, z"
         ).copy()
         self.step_count = 0
-        self._initial_state_cost = float(self.state_cost_fn(self.state[0]))
+        self._initial_state_cost = lobe_state_cost(self.state, self.state_cost_fn)
         if not np.isfinite(self._initial_state_cost):
             raise ValueError("state_cost_fn must return a finite value")
         self._terminated = False
@@ -291,7 +355,9 @@ class LorenzEnvEuler:
             else:
                 scaled_norm = float(np.linalg.norm(self.state / state_scale))
                 diverged = bool(state_scale > self.divergence_threshold / scaled_norm)
-        raw_state_cost = 1.0 if diverged else float(self.state_cost_fn(self.state[0]))
+        raw_state_cost = (
+            1.0 if diverged else lobe_state_cost(self.state, self.state_cost_fn)
+        )
         if not np.isfinite(raw_state_cost):
             raise ValueError("state_cost_fn must return a finite value")
         remaining_state_terms = self.horizon - self.step_count + 1 if diverged else 1
@@ -391,19 +457,24 @@ class QLearningAgent:
         epsilon: float = EXPERIMENT_DEFAULTS.epsilon,
         epsilon_decay: float = EXPERIMENT_DEFAULTS.epsilon_decay,
         epsilon_min: float = EXPERIMENT_DEFAULTS.epsilon_min,
+        trace_lambda: float = EXPERIMENT_DEFAULTS.trace_lambda,
         state_bins: Union[int, Sequence[int]] = EXPERIMENT_DEFAULTS.state_bins,
         state_bounds: Sequence[Tuple[float, float]] = DEFAULT_STATE_BOUNDS,
         random_seed: Optional[int] = EXPERIMENT_DEFAULTS.exploration_seed,
+        preferred_action: Optional[int] = None,
     ):
 
         n_actions = cast(int, _positive_int(n_actions, "n_actions"))
 
         self.learning_rate, self.discount_factor = float(learning_rate), float(discount_factor)
+        self.trace_lambda = float(trace_lambda)
         numeric_rules = (
             (np.isfinite(self.learning_rate) and 0.0 < self.learning_rate <= 1.0,
              "learning_rate must be in (0, 1]"),
             (np.isfinite(self.discount_factor) and 0.0 <= self.discount_factor <= 1.0,
              "discount_factor must be in [0, 1]"),
+            (np.isfinite(self.trace_lambda) and 0.0 <= self.trace_lambda <= 1.0,
+             "trace_lambda must be in [0, 1]"),
             (np.isfinite([epsilon_min, epsilon, epsilon_decay]).all()
              and 0.0 <= epsilon_min <= epsilon <= 1.0,
              "require 0 <= epsilon_min <= epsilon <= 1"),
@@ -413,6 +484,15 @@ class QLearningAgent:
             if not valid:
                 raise ValueError(message)
         self.n_actions = int(n_actions)
+        if preferred_action is None:
+            preferred_action = self.n_actions // 2
+        if not isinstance(preferred_action, (int, np.integer)) or isinstance(
+            preferred_action, (bool, np.bool_)
+        ):
+            raise TypeError("preferred_action must be an integer index")
+        if preferred_action < 0 or preferred_action >= self.n_actions:
+            raise IndexError("preferred_action index is out of range")
+        self.preferred_action = int(preferred_action)
         self.epsilon = float(epsilon)
         self.epsilon_decay = float(epsilon_decay)
         self.epsilon_min = float(epsilon_min)
@@ -420,6 +500,7 @@ class QLearningAgent:
         self.rng = np.random.default_rng(random_seed)
         self.q_table = np.zeros(self.discretizer.bins + (self.n_actions,),
                                 dtype=np.float64)
+        self.eligibility_traces = np.zeros_like(self.q_table)
 
     def discretize_state(self, state: StateVector) -> Tuple[int, int, int]:
         return self.discretizer.discretize(state)
@@ -428,7 +509,21 @@ class QLearningAgent:
         state_index = self.discretize_state(state)
         if training and self.rng.random() < self.epsilon:
             return int(self.rng.integers(self.n_actions))
-        return int(np.argmax(self.q_table[state_index]))
+        action_values = self.q_table[state_index]
+        greedy_actions = np.flatnonzero(action_values == np.max(action_values))
+        return int(
+            greedy_actions[np.argmin(np.abs(greedy_actions - self.preferred_action))]
+        )
+
+    def is_greedy_action(self, state: StateVector, action: int) -> bool:
+        state_index = self.discretize_state(state)
+        return bool(
+            self.q_table[state_index + (int(action),)]
+            == np.max(self.q_table[state_index])
+        )
+
+    def reset_eligibility_traces(self) -> None:
+        self.eligibility_traces.fill(0.0)
 
     def update(
         self,
@@ -437,6 +532,7 @@ class QLearningAgent:
         reward: float,
         next_state: StateVector,
         done: bool,
+        next_action_is_greedy: bool = True,
     ) -> float:
         if not isinstance(action, (int, np.integer)):
             raise TypeError("action must be an integer index")
@@ -445,6 +541,8 @@ class QLearningAgent:
             raise IndexError("action index is out of range")
         if not isinstance(done, (bool, np.bool_)):
             raise TypeError("done must be a boolean")
+        if not isinstance(next_action_is_greedy, (bool, np.bool_)):
+            raise TypeError("next_action_is_greedy must be a boolean")
 
         reward_value = float(reward)
         if not np.isfinite(reward_value):
@@ -460,7 +558,12 @@ class QLearningAgent:
             next_index = self.discretize_state(next_state)
             target = reward_value + self.discount_factor * float(np.max(self.q_table[next_index]))
         td_error = target - current_value
-        self.q_table[table_index] += self.learning_rate * td_error
+        self.eligibility_traces[table_index] = 1.0
+        self.q_table += self.learning_rate * td_error * self.eligibility_traces
+        if done or not next_action_is_greedy:
+            self.reset_eligibility_traces()
+        else:
+            self.eligibility_traces *= self.discount_factor * self.trace_lambda
         return float(td_error)
 
     def decay_epsilon(self) -> float:
@@ -468,7 +571,10 @@ class QLearningAgent:
         return self.epsilon
 
 
-EvaluationResults = Dict[str, Union[List[float], List[int], List[bool], List[np.ndarray]]]
+EvaluationResults = Dict[
+    str,
+    Union[List[float], List[int], List[Optional[int]], List[bool], List[np.ndarray]],
+]
 
 
 @dataclass
@@ -505,6 +611,9 @@ def _run_episode(
     record_rollout: bool = False,
 ) -> _EpisodeResult:
     current_state = env.reset(x0=x0)
+    if training:
+        agent.reset_eligibility_traces()
+    action = agent.select_action(current_state, training=training)
     keep_rollout = not training or record_rollout
     states = [current_state.copy()] if keep_rollout else []
     actions: List[int] = []
@@ -515,10 +624,29 @@ def _run_episode(
     done = False
 
     while not done and (max_steps is None or steps < max_steps):
-        action = agent.select_action(current_state, training=training)
-        next_state, reward, done, info = env.step(action)
+        next_state, environment_reward, done, info = env.step(action)
+        reward = potential_shaped_reward(
+            environment_reward,
+            current_state,
+            next_state,
+            agent.discount_factor,
+            env.potential_shaping_weight,
+            done=done,
+        )
         if training:
-            agent.update(current_state, action, reward, next_state, done)
+            next_action = None
+            next_action_is_greedy = True
+            if not done:
+                next_action = agent.select_action(next_state, training=True)
+                next_action_is_greedy = agent.is_greedy_action(next_state, next_action)
+            agent.update(
+                current_state,
+                action,
+                reward,
+                next_state,
+                done,
+                next_action_is_greedy=next_action_is_greedy,
+            )
         if keep_rollout:
             actions.append(action)
             controls.append(float(env.actions[action]))
@@ -531,6 +659,12 @@ def _run_episode(
                 first_target_step = steps
             target_steps += 1
         diverged = diverged or bool(info.get("diverged", False))
+        if not done:
+            action = (
+                cast(int, next_action)
+                if training
+                else agent.select_action(current_state, training=False)
+            )
 
     return _EpisodeResult(float(total_reward), steps, diverged,
                           first_target_step, target_steps,
@@ -671,6 +805,8 @@ def evaluate_q_learning(
     all_controls: List[np.ndarray] = []
     trajectories: List[np.ndarray] = []
     diverged: List[bool] = []
+    first_target_steps: List[Optional[int]] = []
+    target_steps: List[int] = []
 
     for episode_index in range(num_episodes):
         episode_x0 = (episode_initial_states[episode_index]
@@ -682,6 +818,8 @@ def evaluate_q_learning(
         all_controls.append(result.controls)
         trajectories.append(result.trajectory)
         diverged.append(result.diverged)
+        first_target_steps.append(result.first_target_step)
+        target_steps.append(result.target_steps)
 
     return {
         "episode_rewards": episode_rewards,
@@ -690,6 +828,8 @@ def evaluate_q_learning(
         "control_values": all_controls,
         "trajectories": trajectories,
         "diverged": diverged,
+        "first_target_steps": first_target_steps,
+        "target_steps": target_steps,
     }
 
 
@@ -750,11 +890,26 @@ def train_q_learning_with_evaluation(
     )
 
     rewards = [np.asarray(result["episode_rewards"], dtype=float) for result in evaluations]
+    target_acquisition_rates = [
+        float(np.mean([step is not None for step in result["first_target_steps"]]))
+        for result in evaluations
+    ]
+    mean_target_occupancies = [
+        float(
+            np.mean(
+                np.asarray(result["target_steps"], dtype=float)
+                / np.asarray(result["episode_lengths"], dtype=float)
+            )
+        )
+        for result in evaluations
+    ]
     checkpoints = {
         "episodes": checkpoint_episodes,
         "mean_rewards": [float(np.mean(values)) for values in rewards],
         "reward_standard_deviations": [float(np.std(values)) for values in rewards],
         "divergence_rates": [float(np.mean(result["diverged"])) for result in evaluations],
+        "target_acquisition_rates": target_acquisition_rates,
+        "mean_target_occupancies": mean_target_occupancies,
         "mean_control_efforts": [
             _mean_control_effort(result, evaluation_env.u_ref)
             for result in evaluations
@@ -779,8 +934,10 @@ def run_q_learning(settings: ExperimentDefaults = EXPERIMENT_DEFAULTS) -> Dict[s
         epsilon=settings.epsilon,
         epsilon_decay=settings.epsilon_decay,
         epsilon_min=settings.epsilon_min,
+        trace_lambda=settings.trace_lambda,
         state_bins=settings.state_bins,
         random_seed=settings.exploration_seed,
+        preferred_action=int(np.argmin(np.abs(training_env.actions))),
     )
     evaluation_env = LorenzEnvEuler(settings, training=False, controlled=True)
     evaluation_starts = settings.make_evaluation_initial_states()

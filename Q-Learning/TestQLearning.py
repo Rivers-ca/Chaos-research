@@ -54,6 +54,8 @@ class QLearningRegressionTests(unittest.TestCase):
         )
         self.assertEqual(run["checkpoints"]["episodes"], [2, 3])
         self.assertEqual(len(run["checkpoints"]["mean_control_efforts"]), 2)
+        self.assertEqual(len(run["checkpoints"]["target_acquisition_rates"]), 2)
+        self.assertEqual(len(run["checkpoints"]["mean_target_occupancies"]), 2)
         self.assertEqual(len(run["checkpoints"]["evaluations"]), 2)
         self.assertEqual(len(run["checkpoints"]["q_tables"]), 2)
         self.assertEqual(len(run["checkpoints"]["epsilons"]), 2)
@@ -68,6 +70,8 @@ class QLearningRegressionTests(unittest.TestCase):
             self.assertEqual(trajectory.shape[0], controls.shape[0] + 1)
             self.assertEqual(trajectory.shape[1], 3)
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
+        self.assertEqual(len(run["evaluation"]["first_target_steps"]), 2)
+        self.assertEqual(len(run["evaluation"]["target_steps"]), 2)
         with tempfile.TemporaryDirectory() as directory:
             compressed_path = Path(directory) / "run.pkl.gz"
             qlearning.save_q_learning_run(run, compressed_path)
@@ -105,6 +109,48 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertAlmostEqual(
             qlearning.default_state_cost_fn(2.0), float(qlearning.phi(2.0))
         )
+
+    def test_lobe_state_cost_only_rewards_the_negative_target(self) -> None:
+        self.assertEqual(qlearning.lobe_state_cost(qlearning.TARGET_FIXED_POINT), 0.0)
+        self.assertEqual(
+            qlearning.lobe_state_cost(qlearning.POSITIVE_FIXED_POINT),
+            qlearning.POSITIVE_LOBE_PENALTY,
+        )
+
+        negative_boundary = qlearning.TARGET_FIXED_POINT + np.array(
+            [qlearning.FIXED_POINT_TOLERANCE, 0.0, 0.0]
+        )
+        positive_boundary = qlearning.POSITIVE_FIXED_POINT + np.array(
+            [qlearning.FIXED_POINT_TOLERANCE, 0.0, 0.0]
+        )
+        self.assertEqual(qlearning.lobe_state_cost(negative_boundary), 0.0)
+        self.assertEqual(
+            qlearning.lobe_state_cost(positive_boundary),
+            qlearning.POSITIVE_LOBE_PENALTY,
+        )
+
+    def test_reward_penalizes_positive_lobe_and_minimizes_forcing_at_target(self) -> None:
+        settings = experiment_settings(
+            evaluation_lyapunov_times=qlearning.LYAPUNOV_EXP * qlearning.DT,
+            action_bins=3,
+            regularized=True,
+        )
+
+        negative_env = qlearning.LorenzEnvEuler(settings)
+        negative_env.reset(qlearning.TARGET_FIXED_POINT)
+        _, zero_forcing_reward, _, _ = negative_env.step(1)
+
+        forced_env = qlearning.LorenzEnvEuler(settings)
+        forced_env.reset(qlearning.TARGET_FIXED_POINT)
+        _, forced_reward, _, _ = forced_env.step(2)
+
+        positive_env = qlearning.LorenzEnvEuler(settings)
+        positive_env.reset(qlearning.POSITIVE_FIXED_POINT)
+        _, positive_lobe_reward, _, _ = positive_env.step(1)
+
+        self.assertEqual(zero_forcing_reward, 0.0)
+        self.assertLess(forced_reward, zero_forcing_reward)
+        self.assertAlmostEqual(positive_lobe_reward, -qlearning.POSITIVE_LOBE_PENALTY)
 
     def test_training_reports_target_fixed_point_occupancy(self) -> None:
         settings = experiment_settings(
@@ -234,6 +280,7 @@ class QLearningRegressionTests(unittest.TestCase):
             n_actions=2,
             learning_rate=0.5,
             discount_factor=0.9,
+            trace_lambda=0.0,
             epsilon=0.0,
             epsilon_min=0.0,
             state_bins=2,
@@ -251,6 +298,93 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertAlmostEqual(td_error, -2.3)
         self.assertAlmostEqual(agent.q_table[agent.discretize_state(state) + (1,)], 0.15)
 
+    def test_watkins_q_lambda_assigns_credit_to_recent_greedy_actions(self) -> None:
+        agent = qlearning.QLearningAgent(
+            n_actions=1,
+            learning_rate=1.0,
+            discount_factor=0.9,
+            trace_lambda=0.8,
+            epsilon=0.0,
+            epsilon_min=0.0,
+            state_bins=3,
+        )
+        first_state = np.array([-20.0, -20.0, 10.0])
+        second_state = np.array([0.0, 0.0, 30.0])
+        terminal_state = np.array([20.0, 20.0, 50.0])
+
+        agent.update(first_state, 0, 0.0, second_state, done=False)
+        agent.update(second_state, 0, 1.0, terminal_state, done=True)
+
+        self.assertAlmostEqual(agent.q_table[agent.discretize_state(second_state) + (0,)], 1.0)
+        self.assertAlmostEqual(agent.q_table[agent.discretize_state(first_state) + (0,)], 0.72)
+        self.assertTrue(np.all(agent.eligibility_traces == 0.0))
+
+    def test_unseen_states_prefer_neutral_center_action(self) -> None:
+        agent = qlearning.QLearningAgent(
+            n_actions=9,
+            epsilon=0.0,
+            epsilon_min=0.0,
+        )
+        state = np.array([0.0, 1.0, 1.05])
+
+        self.assertEqual(agent.select_action(state, training=False), 4)
+
+        state_index = agent.discretize_state(state)
+        agent.q_table[state_index + (1,)] = 1.0
+        agent.q_table[state_index + (4,)] = 1.0
+        self.assertEqual(agent.select_action(state, training=False), 4)
+
+    def test_watkins_q_lambda_clears_traces_after_nongreedy_action(self) -> None:
+        agent = qlearning.QLearningAgent(
+            n_actions=2,
+            learning_rate=1.0,
+            discount_factor=0.9,
+            trace_lambda=0.8,
+            epsilon=0.0,
+            epsilon_min=0.0,
+            state_bins=3,
+        )
+        first_state = np.array([-20.0, -20.0, 10.0])
+        second_state = np.array([0.0, 0.0, 30.0])
+        terminal_state = np.array([20.0, 20.0, 50.0])
+
+        agent.update(
+            first_state,
+            0,
+            0.0,
+            second_state,
+            done=False,
+            next_action_is_greedy=False,
+        )
+        agent.update(second_state, 0, 1.0, terminal_state, done=True)
+
+        self.assertEqual(agent.q_table[agent.discretize_state(first_state) + (0,)], 0.0)
+        self.assertEqual(agent.q_table[agent.discretize_state(second_state) + (0,)], 1.0)
+
+    def test_potential_shaping_rewards_progress_toward_negative_target(self) -> None:
+        farther_state = np.array([0.0, 1.0, 1.05])
+        closer_state = qlearning.TARGET_FIXED_POINT.copy()
+        shaped_reward = qlearning.potential_shaped_reward(
+            0.0,
+            farther_state,
+            closer_state,
+            discount_factor=0.99,
+            shaping_weight=0.05,
+            done=False,
+        )
+        self.assertGreater(shaped_reward, 0.0)
+        self.assertAlmostEqual(
+            qlearning.potential_shaped_reward(
+                -0.25,
+                farther_state,
+                closer_state,
+                discount_factor=0.99,
+                shaping_weight=0.0,
+                done=False,
+            ),
+            -0.25,
+        )
+
     def test_q_update_rejects_nonfinite_reward(self) -> None:
         agent = qlearning.QLearningAgent(n_actions=2)
         with self.assertRaisesRegex(ValueError, "reward must be finite"):
@@ -263,6 +397,8 @@ class QLearningRegressionTests(unittest.TestCase):
             qlearning.QLearningAgent(n_actions=2, discount_factor=np.nan)
         with self.assertRaises(ValueError):
             qlearning.QLearningAgent(n_actions=2, epsilon_decay=np.nan)
+        with self.assertRaises(ValueError):
+            qlearning.QLearningAgent(n_actions=2, trace_lambda=np.nan)
 
     def test_integer_configuration_does_not_silently_truncate(self) -> None:
         with self.assertRaises(TypeError):

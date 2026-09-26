@@ -1,0 +1,42 @@
+{
+  "action_bins": 9,
+  "action_high": 1.0,
+  "action_low": -1.0,
+  "control_cost": 0.007,
+  "control_cost_reference": 20.0,
+  "discount_factor": 0.999,
+  "divergence_threshold": Infinity,
+  "episodes": 1000,
+  "epsilon": 0.99,
+  "epsilon_decay": 0.995,
+  "epsilon_min": 0.0,
+  "eval_episodes": 20,
+  "eval_max_steps": null,
+  "evaluation_ic_perturbation": 0.01,
+  "evaluation_interval": 100,
+  "evaluation_lyapunov_times": 100.0,
+  "evaluation_seed": 0,
+  "exploration_seed": null,
+  "ic": [
+    0.0,
+    1.0,
+    1.05
+  ],
+  "learning_rate": 0.005,
+  "max_steps": null,
+  "potential_shaping_weight": 0.005,
+  "print_every": 50,
+  "regularized": true,
+  "state_bins": [
+    20,
+    20,
+    20
+  ],
+  "state_cost_fn": "default_state_cost_fn",
+  "trace_lambda": 0.95,
+  "training_ic_perturbation": 0.01,
+  "training_ic_seed": 0,
+  "training_lyapunov_times": 100.0,
+  "training_plot_samples": 20,
+  "u_ref": 1.0
+}
