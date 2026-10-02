@@ -136,6 +136,10 @@ class ExperimentDefaults:
     exploration_seed: Optional[int] = None
     evaluation_seed: Optional[int] = 0
     evaluation_ic_perturbation: float = 0.01
+    use_attractor_initial_state_ensemble: bool = True
+    attractor_initial_states_per_lobe: int = 10
+    attractor_burn_in_steps: int = 2_000
+    attractor_sample_spacing: int = 25
 
     training_lyapunov_times: float = 100.0
     evaluation_lyapunov_times: float = 100.0
@@ -164,11 +168,36 @@ class ExperimentDefaults:
         return recorded
 
     def make_training_initial_state_sampler(self) -> Callable[[], np.ndarray]:
+        if (
+            self.use_attractor_initial_state_ensemble
+            and self.training_ic_perturbation > 0.0
+        ):
+            ensemble = make_attractor_initial_states(
+                self.ic,
+                self.attractor_initial_states_per_lobe,
+                burn_in_steps=self.attractor_burn_in_steps,
+                sample_spacing=self.attractor_sample_spacing,
+            )
+            return make_ensemble_initial_state_sampler(
+                ensemble, self.training_ic_seed
+            )
         return make_random_initial_state_sampler(
             self.ic, self.training_ic_perturbation, self.training_ic_seed
         )
 
     def make_evaluation_initial_states(self) -> np.ndarray:
+        if self.use_attractor_initial_state_ensemble:
+            states_per_lobe = max(
+                self.attractor_initial_states_per_lobe,
+                (self.eval_episodes + 1) // 2,
+            )
+            ensemble = make_attractor_initial_states(
+                self.ic,
+                states_per_lobe,
+                burn_in_steps=self.attractor_burn_in_steps,
+                sample_spacing=self.attractor_sample_spacing,
+            )
+            return ensemble[: self.eval_episodes].copy()
         return make_evaluation_initial_states(
             self.ic,
             self.eval_episodes,
@@ -243,6 +272,95 @@ def make_random_initial_state_sampler(
         raise ValueError("perturbation must be finite and nonnegative")
     rng = np.random.default_rng(random_seed)
     return lambda: reference + rng.uniform(-perturbation, perturbation, size=3)
+
+
+def make_ensemble_initial_state_sampler(
+    initial_states: ArrayLike,
+    random_seed: Optional[int] = None,
+) -> Callable[[], np.ndarray]:
+    """Cycle through shuffled initial states without replacement."""
+    states = np.asarray(initial_states, dtype=np.float64)
+    if states.ndim != 2 or states.shape[1] != 3 or states.shape[0] < 1:
+        raise ValueError("initial_states must have shape (n, 3) with n >= 1")
+    if not np.isfinite(states).all():
+        raise ValueError("initial_states must contain only finite values")
+    states = states.copy()
+    rng = np.random.default_rng(random_seed)
+    order = np.arange(states.shape[0])
+    position = states.shape[0]
+
+    def sample() -> np.ndarray:
+        nonlocal position
+        if position >= states.shape[0]:
+            rng.shuffle(order)
+            position = 0
+        state = states[order[position]].copy()
+        position += 1
+        return state
+
+    return sample
+
+
+def make_attractor_initial_states(
+    reference_state: Sequence[float],
+    states_per_lobe: int = 10,
+    *,
+    burn_in_steps: int = 2_000,
+    sample_spacing: int = 25,
+) -> np.ndarray:
+    """Build a balanced, well-separated ensemble on the Lorenz attractor."""
+    reference = _finite_array(
+        reference_state, (3,), "reference_state must contain three finite values"
+    ).copy()
+    states_per_lobe = cast(
+        int, _positive_int(states_per_lobe, "states_per_lobe")
+    )
+    burn_in_steps = cast(int, _positive_int(burn_in_steps, "burn_in_steps"))
+    sample_spacing = cast(int, _positive_int(sample_spacing, "sample_spacing"))
+    candidates_per_lobe = max(100, states_per_lobe * 10)
+    candidates: Dict[int, List[np.ndarray]] = {-1: [], 1: []}
+    state = reference
+    maximum_steps = burn_in_steps + sample_spacing * candidates_per_lobe * 100
+
+    for step in range(1, maximum_steps + 1):
+        state = LorenzEnvEuler._euler_step(state, 0.0)
+        if not np.isfinite(state).all():
+            raise FloatingPointError(
+                "Lorenz integration diverged while building initial states"
+            )
+        if step <= burn_in_steps or (step - burn_in_steps) % sample_spacing:
+            continue
+        side = -1 if state[0] < 0.0 else 1
+        if len(candidates[side]) < candidates_per_lobe:
+            candidates[side].append(state.copy())
+        if all(len(values) >= candidates_per_lobe for values in candidates.values()):
+            break
+
+    if any(len(values) < states_per_lobe for values in candidates.values()):
+        raise RuntimeError("could not sample enough states from both Lorenz lobes")
+
+    def select_spread(values: List[np.ndarray]) -> np.ndarray:
+        pool = np.asarray(values, dtype=np.float64)
+        scale = np.ptp(pool, axis=0)
+        scale[scale == 0.0] = 1.0
+        normalized = pool / scale
+        selected = [int(np.argmax(np.linalg.norm(normalized - normalized.mean(axis=0), axis=1)))]
+        minimum_distances = np.linalg.norm(normalized - normalized[selected[0]], axis=1)
+        while len(selected) < states_per_lobe:
+            next_index = int(np.argmax(minimum_distances))
+            selected.append(next_index)
+            minimum_distances = np.minimum(
+                minimum_distances,
+                np.linalg.norm(normalized - normalized[next_index], axis=1),
+            )
+        return pool[selected]
+
+    left = select_spread(candidates[-1])
+    right = select_spread(candidates[1])
+    ensemble = np.empty((states_per_lobe * 2, 3), dtype=np.float64)
+    ensemble[0::2] = left
+    ensemble[1::2] = right
+    return ensemble
 
 
 class LorenzEnvEuler:
@@ -907,7 +1025,10 @@ def train_q_learning_with_evaluation(
         "episodes": checkpoint_episodes,
         "mean_rewards": [float(np.mean(values)) for values in rewards],
         "reward_standard_deviations": [float(np.std(values)) for values in rewards],
-        "divergence_rates": [float(np.mean(result["diverged"])) for result in evaluations],
+        "divergence_rates": [
+            float(np.mean(cast(List[bool], result["diverged"])))
+            for result in evaluations
+        ],
         "target_acquisition_rates": target_acquisition_rates,
         "mean_target_occupancies": mean_target_occupancies,
         "mean_control_efforts": [

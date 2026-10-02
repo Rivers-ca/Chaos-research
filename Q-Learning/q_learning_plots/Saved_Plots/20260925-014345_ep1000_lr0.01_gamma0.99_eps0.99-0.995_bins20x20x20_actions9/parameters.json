@@ -4,7 +4,7 @@
   "action_low": -1.0,
   "control_cost": 0.007,
   "discount_factor": 0.99,
-  "divergence_threshold": Infinity,
+  "divergence_threshold": null,
   "episodes": 1000,
   "epsilon": 0.99,
   "epsilon_decay": 0.995,

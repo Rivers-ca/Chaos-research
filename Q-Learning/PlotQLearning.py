@@ -1795,6 +1795,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _json_safe_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Replace non-finite floats, which JSON does not support, with null."""
+    return {
+        key: (None if isinstance(value, float) and not np.isfinite(value) else value)
+        for key, value in settings.items()
+    }
+
+
 def main() -> None:
     """Load one completed run and render its plots."""
     parser = _build_parser()
@@ -1869,7 +1877,14 @@ def main() -> None:
         )
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "parameters.json").write_text(
-            json.dumps(settings, indent=2, sort_keys=True, default=str) + "\n"
+            json.dumps(
+                _json_safe_settings(settings),
+                indent=2,
+                sort_keys=True,
+                default=str,
+                allow_nan=False,
+            )
+            + "\n"
         )
 
     # Render the final-run plots at the root of the labeled run archive.

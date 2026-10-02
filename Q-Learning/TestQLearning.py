@@ -449,6 +449,47 @@ class QLearningRegressionTests(unittest.TestCase):
             np.all(np.abs(starts - np.array([0.0, 1.0, 1.05])) <= 0.01)
         )
 
+    def test_attractor_ensemble_is_balanced_distinct_and_reproducible(self) -> None:
+        ensemble = qlearning.make_attractor_initial_states(
+            [0.0, 1.0, 1.05],
+            states_per_lobe=10,
+            burn_in_steps=500,
+            sample_spacing=10,
+        )
+        repeated = qlearning.make_attractor_initial_states(
+            [0.0, 1.0, 1.05],
+            states_per_lobe=10,
+            burn_in_steps=500,
+            sample_spacing=10,
+        )
+
+        self.assertEqual(ensemble.shape, (20, 3))
+        np.testing.assert_array_equal(ensemble, repeated)
+        self.assertEqual(np.count_nonzero(ensemble[:, 0] < 0.0), 10)
+        self.assertEqual(np.count_nonzero(ensemble[:, 0] >= 0.0), 10)
+        self.assertEqual(np.unique(ensemble, axis=0).shape[0], 20)
+
+    def test_ensemble_sampler_uses_every_state_before_repeating(self) -> None:
+        ensemble = qlearning.make_attractor_initial_states(
+            [0.0, 1.0, 1.05],
+            states_per_lobe=3,
+            burn_in_steps=500,
+            sample_spacing=10,
+        )
+        sampler = qlearning.make_ensemble_initial_state_sampler(ensemble, random_seed=4)
+        sampled = np.asarray([sampler() for _ in range(len(ensemble))])
+
+        self.assertEqual(np.unique(sampled, axis=0).shape[0], len(ensemble))
+        self.assertEqual(np.count_nonzero(sampled[:, 0] < 0.0), 3)
+        self.assertEqual(np.count_nonzero(sampled[:, 0] >= 0.0), 3)
+
+    def test_default_evaluation_ensemble_alternates_lobes(self) -> None:
+        starts = qlearning.EXPERIMENT_DEFAULTS.make_evaluation_initial_states()
+
+        self.assertEqual(starts.shape, (20, 3))
+        self.assertTrue(np.all(starts[0::2, 0] < 0.0))
+        self.assertTrue(np.all(starts[1::2, 0] >= 0.0))
+
     def test_checkpoint_training_preserves_continuous_history(self) -> None:
         settings = experiment_settings(
             training_lyapunov_times=0.02,

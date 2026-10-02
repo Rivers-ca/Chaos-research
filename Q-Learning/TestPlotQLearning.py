@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -26,6 +27,15 @@ SPEC.loader.exec_module(plot_qlearning)
 
 
 class PlotQLearningRegressionTests(unittest.TestCase):
+    def test_saved_settings_are_strict_json(self) -> None:
+        settings = plot_qlearning.qlearning.EXPERIMENT_DEFAULTS.as_dict()
+
+        encoded = json.dumps(
+            plot_qlearning._json_safe_settings(settings), allow_nan=False
+        )
+
+        self.assertIsNone(json.loads(encoded)["divergence_threshold"])
+
     def test_cloud_placeholder_is_rejected_before_loading(self) -> None:
         with (
             patch.object(plot_qlearning.sys, "platform", "darwin"),

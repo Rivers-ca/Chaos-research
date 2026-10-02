@@ -1,0 +1,16 @@
+1.Fix Bad Code!
+
+2.Try forcing 2-3
+
+3.No reward for neg lobe only punisment
+
+4.Explain tracing
+
+5.Build ensemble of IC's 
+    - Dont start at similar point
+        -System is chaoitc so it is determintic 
+    -10 on IC left
+    -10 on IC right 
+        - And so on
+-A lot of noise 
+-Try more varied runs 
