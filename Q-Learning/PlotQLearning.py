@@ -103,6 +103,8 @@ def _run_directory(
         f"_ep{settings['episodes']}"
         f"_lr{settings['learning_rate']:g}"
         f"_gamma{settings['discount_factor']:g}"
+        f"_alpha{settings.get('control_cost', qlearning.LAMBDA):g}"
+        f"_forcing{settings.get('u_ref', qlearning.U_REF):g}"
         f"_eps{settings['epsilon']:g}-{settings['epsilon_decay']:g}"
         f"_bins{state_bins}"
         f"_actions{settings['action_bins']}"
