@@ -50,3 +50,7 @@ Partick
     -For me get controler working 
 
 - Think about different appraoches 
+- Not about the fixed point 
+-Only need a refrence for it to stay on one lobe 
+-Track precent it succed next to lobe 
+-Dont force towards a lobe, only try to in lobe in 51% 
