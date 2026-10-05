@@ -1,7 +1,7 @@
 -Fix Bad Code!
 -IMPLEMENT DQN ASAP
 -No reward for neg lobe only punisment
--Explain tracing
+izing for 1 l-time foward in time 
 
 -Build ensemble of IC's 
     - Dont start at similar point
@@ -13,3 +13,40 @@
     
 -A lot of noise 
 -Try more varied runs 
+
+
+10/05/26 Meeting 
+
+
+-Refine tracing
+
+-20 l-times 
+    -see if we can train for cheaper 
+-restrict horizins to equal limits
+    -set gamma to zero for all future rewards 
+    -only optomize one time step in the future 
+
+Partick
+-Will rever back to MPC version 
+-Greedy version of salesman 
+    -Not optomizing for entire wing for entire time 
+    -Get to next state and optomize for next state 
+        -Discontuions action version before 
+    -Actions are determintic on gradient values 
+        -loss function with repsect to action 
+        -Small action is enough to control entire system 
+            -sometimes 
+    -Action matains constant between windows now 
+    -Look into gradeint computed at each step based on action decided
+
+
+    -Rl system takes action learns from action and learns from conseuequence 
+        -Takes action and sees what happens 
+            -This update helps it "learn" and "understand" conseuequence of Actions
+        -BPPT learns from equations vs RL which learns from rewards from longer and longer actions 
+            -Methods should convergence 
+            -Inofrmation theory (Look up later)
+
+    -For me get controler working 
+
+- Think about different appraoches 
