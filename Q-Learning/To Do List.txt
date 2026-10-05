@@ -1,16 +1,15 @@
-1.Fix Bad Code!
+-Fix Bad Code!
+-IMPLEMENT DQN ASAP
+-No reward for neg lobe only punisment
+-Explain tracing
 
-2.Try forcing 2-3
-
-3.No reward for neg lobe only punisment
-
-4.Explain tracing
-
-5.Build ensemble of IC's 
+-Build ensemble of IC's 
     - Dont start at similar point
         -System is chaoitc so it is determintic 
     -10 on IC left
     -10 on IC right 
         - And so on
+        (Done)
+    
 -A lot of noise 
 -Try more varied runs 
