@@ -54,3 +54,5 @@ Partick
 -Only need a refrence for it to stay on one lobe 
 -Track precent it succed next to lobe 
 -Dont force towards a lobe, only try to in lobe in 51% 
+    - Add tracker 
+    -Note 51% is good but like 70% is great 
