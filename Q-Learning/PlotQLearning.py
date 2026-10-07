@@ -1334,6 +1334,71 @@ def plot_evaluation_diagnostics(
     )
 
 
+def plot_evaluation_lobe_occupancy(
+    evaluation: Mapping[str, Any],
+    output_path: Path | None,
+    *,
+    show: bool = False,
+    dpi: int = 160,
+) -> None:
+    """Plot the share of final evaluation time spent in each Lorenz lobe."""
+    if (
+        "negative_lobe_percentage" in evaluation
+        and "positive_lobe_percentage" in evaluation
+    ):
+        percentages = np.asarray(
+            [
+                evaluation["negative_lobe_percentage"],
+                evaluation["positive_lobe_percentage"],
+            ],
+            dtype=np.float64,
+        )
+    else:
+        percentages = np.asarray(
+            qlearning.lobe_time_percentages(evaluation.get("trajectories", [])),
+            dtype=np.float64,
+        )
+    if percentages.shape != (2,) or not np.isfinite(percentages).all():
+        raise ValueError("Evaluation lobe percentages must be two finite values")
+    if np.any(percentages < 0.0) or not np.isclose(percentages.sum(), 100.0):
+        raise ValueError(
+            "Evaluation lobe percentages must be nonnegative and sum to 100"
+        )
+
+    figure, axis = plt.subplots(figsize=(8, 6))
+    bars = axis.bar(
+        ["Negative lobe", "Positive lobe"],
+        percentages,
+        color=["tab:blue", "tab:red"],
+        width=0.62,
+    )
+    axis.bar_label(
+        bars,
+        labels=[f"{value:.1f}%" for value in percentages],
+        padding=4,
+    )
+    axis.set_ylim(0.0, 105.0)
+    axis.set_ylabel("Evaluation time (%)")
+    axis.set_title("Time spent in each lobe during final evaluation")
+    axis.grid(axis="y", alpha=0.25)
+    episode_percentages = evaluation.get("episode_negative_lobe_percentages")
+    if episode_percentages is None:
+        episode_percentages = [
+            qlearning.lobe_time_percentages([trajectory])[0]
+            for trajectory in evaluation.get("trajectories", [])
+        ]
+    successful_trials = sum(value >= 51.0 for value in episode_percentages)
+    axis.text(
+        0.5,
+        0.94,
+        f"Trials reaching ≥51% negative: {successful_trials}/{len(episode_percentages)}",
+        ha="center",
+        va="top",
+        transform=axis.transAxes,
+    )
+    _finish_figure(figure, output_path, show=show, dpi=dpi)
+
+
 def plot_uncontrolled_evaluation_reference(
     evaluation: Mapping[str, Sequence[Any]],
     output_dir: Path | None,
@@ -1710,6 +1775,12 @@ def plot_run_figures(
         dpi=dpi,
     )
     plot_evaluation_diagnostics(evaluation, output_dir, show=show, dpi=dpi)
+    plot_evaluation_lobe_occupancy(
+        evaluation,
+        output_path("evaluation_lobe_occupancy.png"),
+        show=show,
+        dpi=dpi,
+    )
     plot_uncontrolled_evaluation_reference(
         evaluation, output_dir, show=show, dpi=dpi
     )

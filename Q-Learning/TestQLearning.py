@@ -72,6 +72,18 @@ class QLearningRegressionTests(unittest.TestCase):
         self.assertEqual(np.asarray(run["q_table"]).ndim, 4)
         self.assertEqual(len(run["evaluation"]["first_target_steps"]), 2)
         self.assertEqual(len(run["evaluation"]["target_steps"]), 2)
+        self.assertIn("negative_lobe_percentage", run["evaluation"])
+        self.assertIn("positive_lobe_percentage", run["evaluation"])
+        self.assertEqual(
+            len(run["evaluation"]["episode_negative_lobe_percentages"]), 2
+        )
+        self.assertGreaterEqual(run["evaluation"]["negative_lobe_success_rate"], 0.0)
+        self.assertLessEqual(run["evaluation"]["negative_lobe_success_rate"], 100.0)
+        self.assertAlmostEqual(
+            run["evaluation"]["negative_lobe_percentage"]
+            + run["evaluation"]["positive_lobe_percentage"],
+            100.0,
+        )
         with tempfile.TemporaryDirectory() as directory:
             compressed_path = Path(directory) / "run.pkl.gz"
             qlearning.save_q_learning_run(run, compressed_path)
@@ -179,6 +191,17 @@ class QLearningRegressionTests(unittest.TestCase):
             "Episode 1 reached the target fixed point at step 1 and held it for 3/3 steps.",
             output.getvalue(),
         )
+
+    def test_lobe_time_percentages_aggregate_all_evaluation_steps(self) -> None:
+        trajectories = [
+            np.array([[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]),
+            np.array([[3.0, 0.0, 0.0], [-2.0, 0.0, 0.0], [-3.0, 0.0, 0.0]]),
+        ]
+
+        negative, positive = qlearning.lobe_time_percentages(trajectories)
+
+        self.assertEqual(negative, 75.0)
+        self.assertEqual(positive, 25.0)
 
     def test_full_episode_return_is_finite(self) -> None:
         env = qlearning.LorenzEnvEuler(
@@ -486,7 +509,9 @@ class QLearningRegressionTests(unittest.TestCase):
     def test_default_evaluation_ensemble_alternates_lobes(self) -> None:
         starts = qlearning.EXPERIMENT_DEFAULTS.make_evaluation_initial_states()
 
-        self.assertEqual(starts.shape, (20, 3))
+        self.assertEqual(starts.shape, (40, 3))
+        self.assertEqual(np.count_nonzero(starts[:, 0] < 0.0), 20)
+        self.assertEqual(np.count_nonzero(starts[:, 0] >= 0.0), 20)
         self.assertTrue(np.all(starts[0::2, 0] < 0.0))
         self.assertTrue(np.all(starts[1::2, 0] >= 0.0))
 

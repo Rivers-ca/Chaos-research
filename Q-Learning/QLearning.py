@@ -29,9 +29,9 @@ B = 8 / 3
 DT = 0.01
 LYAPUNOV_EXP = 0.9056
 EPS = 2.0
-U_REF = 10.0
-LAMBDA = 0.007
-EPISODES = 1000
+U_REF = 2.5
+LAMBDA = 0.01
+EPISODES = 800
 
 FIXED_POINT_COORDINATE = float(np.sqrt(B * (RAYLEIGH - 1)))
 TARGET_FIXED_POINT = np.array(
@@ -123,8 +123,8 @@ def potential_shaped_reward(
 @dataclass(frozen=True)
 class ExperimentDefaults:
     episodes: int = EPISODES
-    eval_episodes: int = 20
-    evaluation_interval: int = 100
+    eval_episodes: int = 40
+    evaluation_interval: int = 50
     max_steps: Optional[int] = None
     eval_max_steps: Optional[int] = None
     print_every: int = 50
@@ -133,16 +133,16 @@ class ExperimentDefaults:
     ic: Tuple[float, float, float] = (0.0, 1.0, 1.05)
     training_ic_seed: Optional[int] = 0
     training_ic_perturbation: float = 0.01
-    exploration_seed: Optional[int] = None
+    exploration_seed: Optional[int] = 0
     evaluation_seed: Optional[int] = 0
     evaluation_ic_perturbation: float = 0.01
     use_attractor_initial_state_ensemble: bool = True
-    attractor_initial_states_per_lobe: int = 10
+    attractor_initial_states_per_lobe: int = 20
     attractor_burn_in_steps: int = 2_000
     attractor_sample_spacing: int = 25
 
-    training_lyapunov_times: float = 100.0
-    evaluation_lyapunov_times: float = 100.0
+    training_lyapunov_times: float = 50.0
+    evaluation_lyapunov_times: float = 50.0
     control_cost: float = LAMBDA
     regularized: bool = True
     action_low: float = -U_REF
@@ -153,12 +153,12 @@ class ExperimentDefaults:
     state_cost_fn: Callable[[float], float] = default_state_cost_fn
 
     state_bins: Tuple[int, int, int] = (20, 20, 20)
-    learning_rate: float = 0.005
-    discount_factor: float = 0.999
+    learning_rate: float = 0.01
+    discount_factor: float = 0.991
     epsilon: float = 0.99
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.0
-    trace_lambda: float = 0.95
+    trace_lambda: float = 0.99
     potential_shaping_weight: float = 0.005
 
     def as_dict(self) -> Dict[str, Any]:
@@ -689,10 +689,7 @@ class QLearningAgent:
         return self.epsilon
 
 
-EvaluationResults = Dict[
-    str,
-    Union[List[float], List[int], List[Optional[int]], List[bool], List[np.ndarray]],
-]
+EvaluationResults = Dict[str, Any]
 
 
 @dataclass
@@ -939,6 +936,16 @@ def evaluate_q_learning(
         first_target_steps.append(result.first_target_step)
         target_steps.append(result.target_steps)
 
+    negative_lobe_percentage, positive_lobe_percentage = lobe_time_percentages(
+        trajectories
+    )
+    episode_negative_lobe_percentages = [
+        lobe_time_percentages([trajectory])[0] for trajectory in trajectories
+    ]
+    negative_lobe_success_rate = 100.0 * float(
+        np.mean(np.asarray(episode_negative_lobe_percentages) >= 51.0)
+    )
+
     return {
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
@@ -948,7 +955,33 @@ def evaluate_q_learning(
         "diverged": diverged,
         "first_target_steps": first_target_steps,
         "target_steps": target_steps,
+        "negative_lobe_percentage": negative_lobe_percentage,
+        "positive_lobe_percentage": positive_lobe_percentage,
+        "episode_negative_lobe_percentages": episode_negative_lobe_percentages,
+        "negative_lobe_success_rate": negative_lobe_success_rate,
     }
+
+
+def lobe_time_percentages(trajectories: Sequence[np.ndarray]) -> Tuple[float, float]:
+    """Return percentages of evaluated steps spent in each Lorenz lobe."""
+    negative_steps = 0
+    positive_steps = 0
+    for trajectory in trajectories:
+        states = np.asarray(trajectory, dtype=np.float64)
+        if states.ndim != 2 or states.shape[1] != 3:
+            raise ValueError("Each evaluation trajectory must have shape (n, 3)")
+
+        # The first state is the initial condition, not elapsed evaluation time.
+        evaluated_x = states[1:, 0]
+        finite_x = evaluated_x[np.isfinite(evaluated_x)]
+        negative_steps += int(np.count_nonzero(finite_x < 0.0))
+        positive_steps += int(np.count_nonzero(finite_x >= 0.0))
+
+    total_steps = negative_steps + positive_steps
+    if total_steps == 0:
+        return 0.0, 0.0
+    negative_percentage = 100.0 * negative_steps / total_steps
+    return negative_percentage, 100.0 - negative_percentage
 
 
 def _mean_control_effort(evaluation: EvaluationResults, u_ref: float) -> float:
@@ -1112,3 +1145,17 @@ def load_q_learning_run(path: Union[str, Path] = RUN_OUTPUT_PATH) -> Dict[str, A
 if __name__ == "__main__":
     run = run_q_learning()
     save_q_learning_run(run)
+    evaluation = cast(EvaluationResults, run["evaluation"])
+    print(
+        f"Time spent in neg lobe: {evaluation['negative_lobe_percentage']:.0f}% --- "
+        f"Time spent in pos lobe: {evaluation['positive_lobe_percentage']:.0f}%"
+    )
+    successful_trials = sum(
+        percentage >= 51.0
+        for percentage in evaluation["episode_negative_lobe_percentages"]
+    )
+    print(
+        f"Evaluation trials with at least 51% time in neg lobe: "
+        f"{successful_trials}/{len(evaluation['episode_negative_lobe_percentages'])} "
+        f"({evaluation['negative_lobe_success_rate']:.0f}%)"
+    )

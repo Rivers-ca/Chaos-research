@@ -27,6 +27,22 @@ SPEC.loader.exec_module(plot_qlearning)
 
 
 class PlotQLearningRegressionTests(unittest.TestCase):
+    def test_evaluation_lobe_occupancy_bar_chart_is_saved(self) -> None:
+        evaluation = {
+            "negative_lobe_percentage": 51.0,
+            "positive_lobe_percentage": 49.0,
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "evaluation_lobe_occupancy.png"
+            plot_qlearning.plot_evaluation_lobe_occupancy(
+                evaluation, output_path, dpi=40
+            )
+
+            self.assertTrue(output_path.is_file())
+            with Image.open(output_path) as chart:
+                self.assertEqual(chart.format, "PNG")
+
     def test_saved_settings_are_strict_json(self) -> None:
         settings = plot_qlearning.qlearning.EXPERIMENT_DEFAULTS.as_dict()
 
