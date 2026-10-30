@@ -30,6 +30,9 @@ outputs/
 /Q-Learning/deep_q_learning_runs/*/deep_q_learning_run.pkl.gz
 /Q-Learning/q_learning_plots/Saved_Plots/DQN/*ep800*/deep_q_learning_run.pkl.gz
 
+# This interrupted sweep archive fails gzip integrity checks; retain only locally.
+/Q-Learning/q_learning_plots/Saved_Plots/Sweeps/efficient_control_sweeps/20261005-224846/gamma_0.9975/q_learning_run.pkl.gz
+
 # Experiment logging
 wandb/
 lightning_logs/

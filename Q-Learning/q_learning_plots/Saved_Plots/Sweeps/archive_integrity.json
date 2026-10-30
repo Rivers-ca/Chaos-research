@@ -1,0 +1,83 @@
+{
+  "checked_on": "2026-10-30",
+  "method": "Full gzip decompression and checksum verification; no pickle objects loaded",
+  "archives": [
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/efficient_control_sweeps/20261005-224846/gamma_0.9975/q_learning_run.pkl.gz",
+      "valid": false,
+      "error": "Error -3 while decompressing data: too many length or distance symbols"
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/efficient_control_sweeps/20261005-224846/gamma_0.999/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/efficient_control_sweeps/20261005-224846/gamma_0.99925/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/efficient_control_sweeps/20261005-224846/gamma_0.9995/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/optimal_individual_runs/20261006-012401/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/alpha_high/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/alpha_low/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/baseline/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/discount_factor_high/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/discount_factor_low/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/forcing_high/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/forcing_low/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/learning_rate_high/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/overnight_runs/20261002-011558/learning_rate_low/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/parameter_variant_sweeps/20261005-231245/control_cost_0.00175/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/parameter_variant_sweeps/20261005-231245/forcing_2.5/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/parameter_variant_sweeps/20261005-231245/learning_rate_0.02/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_plots/Saved_Plots/Sweeps/parameter_variant_sweeps/20261005-231245/trace_lambda_0.90/q_learning_run.pkl.gz",
+      "valid": true
+    },
+    {
+      "path": "Q-Learning/q_learning_run.pkl.gz",
+      "valid": true
+    }
+  ]
+}

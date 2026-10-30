@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/ParameterVariantSweep.py", line 82, in main
+    plotting_seconds = run_plots(
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/EfficientControlSweep.py", line 129, in run_plots
+    subprocess.run(command, cwd=HERE, check=True, stdout=log, stderr=subprocess.STDOUT)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/Library/Developer/CommandLineTools/usr/bin/python3', '/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py', '--run-data', '/Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/control_cost_0.00175/q_learning_run.pkl.gz', '--output-dir', '/Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots', '--no-gif']' returned non-zero exit status 1.

@@ -1,0 +1,85 @@
+Initializing plotting libraries
+Loading run data from /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/control_cost_0.00175/q_learning_run.pkl.gz
+Rendering final-run plots
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/training_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/training_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/training_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/target_acquisition.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/checkpoint_evaluations.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_control_correction.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_state_coordinates.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_lobe_occupancy.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_uncontrolled_lorenz.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/evaluation_uncontrolled_state_path.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/q_table_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/q_table_action_map.png
+Rendering checkpoint 1/16 (episode 50)
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/training_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/training_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/training_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/target_acquisition.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/checkpoint_evaluations.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_control_correction.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_state_coordinates.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_lobe_occupancy.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_uncontrolled_lorenz.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/evaluation_uncontrolled_state_path.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/q_table_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050/q_table_action_map.png
+Saved episode 50 learning snapshot to /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0050
+Rendering checkpoint 2/16 (episode 100)
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/training_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/training_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/training_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/target_acquisition.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/checkpoint_evaluations.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/evaluation_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/evaluation_control_correction.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/parameter_variant_sweeps/20261005-231245/plots/Saved_Plots/20261005-234427_ep800_lr0.01_gamma0.9995_alpha0.00175_forcing3_eps0.99-0.995_bins20x20x20_actions9/episode_0100/evaluation_trajectory.png
+Traceback (most recent call last):
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/ImageFile.py", line 644, in _save
+    fh = fp.fileno()
+AttributeError: '_idat' object has no attribute 'fileno'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py", line 2065, in <module>
+    main()
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py", line 2018, in main
+    plot_run_figures(
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py", line 1777, in plot_run_figures
+    plot_evaluation_diagnostics(evaluation, output_dir, show=show, dpi=dpi)
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py", line 1329, in plot_evaluation_diagnostics
+    _finish_figure(
+  File "/Users/riverscalareso/Desktop/Python/Q-Learning/PlotQLearning.py", line 188, in _finish_figure
+    figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/figure.py", line 3395, in savefig
+    self.canvas.print_figure(fname, **kwargs)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/backend_bases.py", line 2204, in print_figure
+    result = print_method(
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/backend_bases.py", line 2054, in <lambda>
+    print_method = functools.wraps(meth)(lambda *args, **kwargs: meth(
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/backends/backend_agg.py", line 496, in print_png
+    self._print_pil(filename_or_obj, "png", pil_kwargs, metadata)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/backends/backend_agg.py", line 445, in _print_pil
+    mpl.image.imsave(
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/matplotlib/image.py", line 1676, in imsave
+    image.save(fname, **pil_kwargs)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/Image.py", line 2588, in save
+    save_handler(self, fp, filename)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/PngImagePlugin.py", line 1495, in _save
+    ImageFile._save(
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/ImageFile.py", line 648, in _save
+    _encode_tile(im, fp, tile, bufsize, None, exc)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/ImageFile.py", line 675, in _encode_tile
+    fp.write(data)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/PngImagePlugin.py", line 1137, in write
+    self.chunk(self.fp, b"IDAT", data)
+  File "/Users/riverscalareso/Library/Python/3.9/lib/python/site-packages/PIL/PngImagePlugin.py", line 1124, in putchunk
+    fp.write(byte_data)
+OSError: [Errno 28] No space left on device
