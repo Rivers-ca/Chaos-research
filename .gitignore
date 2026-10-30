@@ -43,6 +43,7 @@ events.out.tfevents.*
 
 # Keep local research papers out of GitHub
 /Relevant Papers*/
+/Q-Learning/Relevant Papers*/
 node_modules
 
 # Pytorch practice lives in its own repo (Rivers-ca/Pytorch-Practice)

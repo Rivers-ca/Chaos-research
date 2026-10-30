@@ -1,58 +1,79 @@
 -Fix Bad Code!
--IMPLEMENT DQN ASAP
--No reward for neg lobe only punisment
-izing for 1 l-time foward in time 
 
--Build ensemble of IC's 
+
+-✅COMMIT TO GITHUB RN!!!!
+-Make documantion of the netwowrk
+    - MOST IMPORTANT THINGS
+-Plot Reward vs epsiodes
+- Check target for dqn
+- Plot debugging setps
+    - For agent and network
+    - STD of
+-Check activation syntax
+- Fix Layers, check with 1 to 2?
+    - See if layers are converging towards a value
+    - if std of rates is going down
+    - if lossof the nerual network is going down
+    - to see if dqn is convg
+        - still need to check if agent is learning right actions
+        - check if rewards of actions is still going up
+
+
+-✅IMPLEMENT DQN ASAP
+-✅No reward for neg lobe only punisment
+izing for 1 l-time foward in time
+
+-✅Build ensemble of IC's
     - Dont start at similar point
-        -System is chaoitc so it is determintic 
+        -System is chaoitc so it is determintic
     -10 on IC left
-    -10 on IC right 
+    -10 on IC right
         - And so on
         (Done)
-    
--A lot of noise 
--Try more varied runs 
+
+-A lot of noise
+-Try more varied runs
 
 
-10/05/26 Meeting 
+10/05/26 Meeting
 
 
 -Refine tracing
 
--20 l-times 
-    -see if we can train for cheaper 
+-✅20 l-times
+    -see if we can train for cheaper
 -restrict horizins to equal limits
-    -set gamma to zero for all future rewards 
-    -only optomize one time step in the future 
+    -set gamma to zero for all future rewards
+    -only optomize one time step in the future
 
 Partick
--Will rever back to MPC version 
--Greedy version of salesman 
-    -Not optomizing for entire wing for entire time 
-    -Get to next state and optomize for next state 
-        -Discontuions action version before 
-    -Actions are determintic on gradient values 
-        -loss function with repsect to action 
-        -Small action is enough to control entire system 
-            -sometimes 
-    -Action matains constant between windows now 
+-Will rever back to MPC version
+-Greedy version of salesman
+    -Not optomizing for entire wing for entire time
+    -Get to next state and optomize for next state
+        -Discontuions action version before
+    -Actions are determintic on gradient values
+        -loss function with repsect to action
+        -Small action is enough to control entire system
+            -sometimes
+    -Action matains constant between windows now
     -Look into gradeint computed at each step based on action decided
 
 
-    -Rl system takes action learns from action and learns from conseuequence 
-        -Takes action and sees what happens 
+    -Rl system takes action learns from action and learns from conseuequence
+        -Takes action and sees what happens
             -This update helps it "learn" and "understand" conseuequence of Actions
-        -BPPT learns from equations vs RL which learns from rewards from longer and longer actions 
-            -Methods should convergence 
+        -BPPT learns from equations vs RL which learns from rewards from longer and longer actions
+            -Methods should convergence
             -Inofrmation theory (Look up later)
 
-    -For me get controler working 
+    -For me get controler working
 
-- Think about different appraoches 
-- Not about the fixed point 
--Only need a refrence for it to stay on one lobe 
--Track precent it succed next to lobe 
--Dont force towards a lobe, only try to in lobe in 51% 
-    - Add tracker 
-    -Note 51% is good but like 70% is great 
+- Think about different appraoches
+- Not about the fixed point
+-Only need a refrence for it to stay on one lobe
+-Track precent it succed next to lobe
+-Dont force towards a lobe, only try to in lobe in 51%
+    - Add tracker
+    -Note 51% is good but like 70% is great
+-✅Switch to rk4
