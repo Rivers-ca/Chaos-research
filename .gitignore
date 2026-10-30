@@ -26,6 +26,10 @@ outputs/
 # per-file size limit. Keep accidental uncompressed copies out of commits.
 /Q-Learning/q_learning_run.pkl
 
+# Full DQN archives exceed GitHub's normal per-file limit; retain them locally.
+/Q-Learning/deep_q_learning_runs/*/deep_q_learning_run.pkl.gz
+/Q-Learning/q_learning_plots/Saved_Plots/DQN/*ep800*/deep_q_learning_run.pkl.gz
+
 # Experiment logging
 wandb/
 lightning_logs/

@@ -1,0 +1,31 @@
+Saving Double DQN run to /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn
+Episode 50/800 | average reward: -0.4208 | epsilon: 0.4589 | replay: 200000
+Episode 100/800 | average reward: -0.4266 | epsilon: 0.0200 | replay: 200000
+Episode 150/800 | average reward: -0.4092 | epsilon: 0.0200 | replay: 200000
+Episode 200/800 | average reward: -0.4109 | epsilon: 0.0200 | replay: 200000
+Episode 250/800 | average reward: -0.4297 | epsilon: 0.0200 | replay: 200000
+Episode 300/800 | average reward: -0.4137 | epsilon: 0.0200 | replay: 200000
+Episode 350/800 | average reward: -0.4312 | epsilon: 0.0200 | replay: 200000
+Episode 400/800 | average reward: -0.4084 | epsilon: 0.0200 | replay: 200000
+Episode 450/800 | average reward: -0.4086 | epsilon: 0.0200 | replay: 200000
+Episode 500/800 | average reward: -0.4273 | epsilon: 0.0200 | replay: 200000
+Episode 550/800 | average reward: -0.4167 | epsilon: 0.0200 | replay: 200000
+Episode 600/800 | average reward: -0.4206 | epsilon: 0.0200 | replay: 200000
+Episode 650/800 | average reward: -0.4189 | epsilon: 0.0200 | replay: 200000
+Episode 700/800 | average reward: -0.4229 | epsilon: 0.0200 | replay: 200000
+Episode 750/800 | average reward: -0.4089 | epsilon: 0.0200 | replay: 200000
+Episode 800/800 | average reward: -0.4356 | epsilon: 0.0200 | replay: 200000
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/training_diagnostics.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/training_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/training_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/target_acquisition.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/checkpoint_evaluations.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_corrected_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_control_correction.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_trajectory.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_state_coordinates.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_lobe_occupancy.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_trial_lobe_occupancy.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_uncontrolled_lorenz.png
+Saved /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/evaluation_uncontrolled_state_path.png
+Saved Double DQN run and plots to /Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn

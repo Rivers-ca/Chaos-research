@@ -1,0 +1,39 @@
+{
+  "evaluation_initial_states_identical": true,
+  "evaluation_horizon_steps": 5521,
+  "dqn_checkpoint_episode": 250,
+  "dqn": {
+    "successful_trial_count": 25,
+    "aggregate_negative_lobe_occupancy": 53.21228038398841,
+    "mean_absolute_forcing": 0.8449131724325304,
+    "rms_forcing": 0.9347668530576264,
+    "normalized_control_effort": 0.1398062511320413,
+    "zero_forcing_percentage": 0.0,
+    "action_change_rate": 0.011965579710144928,
+    "divergence_rate": 0.0,
+    "runtime_seconds": 34.41872870800012
+  },
+  "final_dqn_episode": 800,
+  "final_dqn": {
+    "successful_trial_count": 19,
+    "aggregate_negative_lobe_occupancy": 49.65540662923384,
+    "mean_absolute_forcing": 2.051012610940047,
+    "rms_forcing": 2.1217398005354986,
+    "normalized_control_effort": 0.7202847649882268,
+    "zero_forcing_percentage": 0.003622532149972831,
+    "action_change_rate": 0.016240942028985506,
+    "divergence_rate": 0.0,
+    "runtime_seconds": 34.28473079200012
+  },
+  "tabular_episode_650": {
+    "successful_trial_count": 25,
+    "aggregate_negative_lobe_occupancy": 49.90038036587575,
+    "mean_absolute_forcing": 1.2109672160840428,
+    "rms_forcing": 1.4770968248941228,
+    "normalized_control_effort": 0.34909040481796777,
+    "zero_forcing_percentage": 17.835084223872485,
+    "action_change_rate": 0.2932019927536232,
+    "divergence_rate": 0.0,
+    "runtime_seconds": 13.467497792
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "source_run": "/Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261022-215212_ep800_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/deep_q_learning_run.pkl.gz",
+  "episodes": 800,
+  "environment_steps": 4416800,
+  "gradient_updates": 4406801,
+  "final_epsilon": 0.020000000000000018,
+  "finite_checks": {
+    "losses": {
+      "count": 4406801,
+      "nonfinite_count": 0
+    },
+    "gradient_norms": {
+      "count": 4406801,
+      "nonfinite_count": 0
+    },
+    "mean_q_values": {
+      "count": 4406801,
+      "nonfinite_count": 0
+    },
+    "max_q_values": {
+      "count": 4406801,
+      "nonfinite_count": 0
+    }
+  },
+  "gradient_clip_fraction": 0.0,
+  "first_checkpoint_successes": 13,
+  "final_checkpoint_successes": 17,
+  "peak_successes": 25,
+  "best_selected_episode": 350,
+  "final_three_meet_selection_rule": false,
+  "training_divergences": 0,
+  "final_evaluation_divergences": 0,
+  "final_mean_negative_lobe_occupancy": 49.79668538308278,
+  "zero_forcing_mean_negative_lobe_occupancy": 48.36306828473103,
+  "mean_occupancy_gain_percentage_points": 1.4336170983517478,
+  "trials_improved_over_zero_forcing": 23,
+  "zero_forcing_successes": 12
+}
