@@ -1,1 +1,0 @@
-This is a hydrogym practice folder for furthering my learning in ml
