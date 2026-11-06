@@ -323,6 +323,24 @@ The default QNetwork is:
 Where the final layer has no activation
 The default uses two hidden layers with 2 neurons each to keep computation minimal.
 
+*Note
+- activation_class = {"relu": nn.ReLU, "tanh": nn.Tanh}[activation]
+- Works through:
+    - {"relu": nn.ReLU, "tanh": nn.Tanh} maps names to PyTorch activation classes.
+    - [activation] selects the class matching the string—for example, "tanh" selects nn.Tanh.
+    - activation_class() creates an activation layer for the network.
+
+- The configuration chooses one activation
+    - activation: str = "tanh"
+    - from [DeepExperimentDefaults (line 84)], to change set activation: str = "relu"
+- The agent passes that setting into each network
+   - QNetwork(..., settings.activation)
+- The network selects the matching class
+    - activation_class = {"relu": nn.ReLU, "tanh": nn.Tanh}[activation]
+
+- It creates that activation wherever needed
+activation_class()
+
 Commands
 Full experiment
 ```sh
