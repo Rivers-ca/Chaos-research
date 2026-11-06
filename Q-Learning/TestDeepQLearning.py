@@ -29,7 +29,6 @@ def tiny_settings(**changes: object) -> deep.DeepExperimentDefaults:
         print_every=100,
         training_plot_samples=3,
         use_attractor_initial_state_ensemble=False,
-        hidden_layers=(16, 16),
         batch_size=4,
         replay_buffer_size=64,
         minimum_replay_size=4,
@@ -43,13 +42,41 @@ class DeepQLearningTests(unittest.TestCase):
     def setUp(self) -> None:
         deep.seed_everything(0)
 
+    def test_rolling_statistics_preserve_warmup_and_measure_variability(self) -> None:
+        means, deviations = deep._rolling_finite_statistics([np.nan, 1.0, 3.0, 5.0], window=2)
+        np.testing.assert_allclose(means, [np.nan, 1.0, 2.0, 4.0], equal_nan=True)
+        np.testing.assert_allclose(deviations, [np.nan, np.nan, 1.0, 1.0], equal_nan=True)
+
+    def test_layer_diagnostics_measure_actual_parameter_changes(self) -> None:
+        run = deep.run_deep_q_learning(tiny_settings(episodes=2, evaluation_interval=1, max_steps=1, eval_max_steps=1))
+        records = run["checkpoints"]["network_checkpoints"]
+        for value in records[0]["online_network_state"].values():
+            value.zero_()
+        for value in records[1]["online_network_state"].values():
+            value.fill_(2.0)
+        figures = {}
+        with tempfile.TemporaryDirectory() as directory:
+            def capture(fig, path):
+                figures[path.name] = fig
+            with patch.object(deep, "_save_figure", side_effect=capture):
+                deep.plot_convergence_diagnostics(run, Path(directory))
+        try:
+            for axis in figures["layer_convergence.png"].axes[3:]:
+                np.testing.assert_allclose(axis.lines[0].get_ydata(), [2.0])
+            reward_axis = figures["evaluation_rewards.png"].axes[0]
+            expected = [np.mean(item["episode_rewards"]) for item in run["checkpoints"]["evaluations"]]
+            np.testing.assert_allclose(reward_axis.lines[0].get_ydata(), expected)
+        finally:
+            for figure in figures.values():
+                deep.plt.close(figure)
+
     def test_network_uses_continuous_three_coordinate_input(self) -> None:
-        network = deep.QNetwork(9, (128, 128))
+        network = deep.QNetwork(9)
         output = network(torch.zeros((5, 3)))
 
         self.assertEqual(tuple(output.shape), (5, 9))
         linear = [module for module in network.modules() if isinstance(module, torch.nn.Linear)]
-        self.assertEqual([(layer.in_features, layer.out_features) for layer in linear], [(3, 128), (128, 128), (128, 9)])
+        self.assertEqual([(layer.in_features, layer.out_features) for layer in linear], [(3, 2), (2, 2), (2, 9)])
 
     def test_activation_is_restored_for_new_and_legacy_runs(self) -> None:
         for activation, expected in (("tanh", torch.nn.Tanh), ("relu", torch.nn.ReLU)):
@@ -229,7 +256,7 @@ class DeepQLearningTests(unittest.TestCase):
             self.assertTrue((output / "final_model.pt").is_file())
             self.assertFalse((output / "best_model.pt").exists())
             self.assertGreater(len(run["history"]["losses"]), 0)
-            self.assertEqual(len(plots), 19)
+            self.assertEqual(len(plots), 23)
             self.assertTrue(all(path.is_file() for path in plots))
             for path in plots:
                 with Image.open(path) as chart:
@@ -257,6 +284,12 @@ class DeepQLearningTests(unittest.TestCase):
                 reward_lines = figures["training_diagnostics.png"].axes[0].lines
                 np.testing.assert_allclose(reward_lines[0].get_ydata(), run["history"]["episode_rewards"])
                 np.testing.assert_allclose(reward_lines[1].get_ydata(), run["history"]["rolling_mean_rewards"])
+                reward_axis = figures["training_rewards.png"].axes[0]
+                np.testing.assert_array_equal(reward_axis.lines[0].get_xdata(), [1])
+                np.testing.assert_allclose(reward_axis.lines[0].get_ydata(), run["history"]["episode_rewards"])
+                np.testing.assert_allclose(reward_axis.lines[1].get_ydata(), run["history"]["rolling_mean_rewards"])
+                self.assertEqual(reward_axis.get_xlabel(), "Episode")
+                self.assertEqual(reward_axis.get_ylabel(), "Total reward")
                 control_axis = figures["evaluation_control_correction.png"].axes[0]
                 control = control_axis.lines[0]
                 end_time = qlearning.steps_to_lyapunov_times(1)
@@ -301,7 +334,7 @@ class DeepQLearningTests(unittest.TestCase):
             archives = list(output.iterdir())
             self.assertEqual(len(archives), 2)
             replot = next(path for path in archives if path != archive)
-            self.assertEqual(len(list(replot.glob("*.png"))), 19)
+            self.assertEqual(len(list(replot.glob("*.png"))), 23)
             self.assertTrue((replot / "parameters.json").is_file())
             self.assertEqual(original, {path.name: path.read_bytes() for path in archive.glob("*.png")})
 

@@ -46,9 +46,9 @@ QNetwork inherits from PyTorch’s nn.Module. Its __init__() method defines the 
 
 The default architecture is:
 
-3 state inputs → Linear(3, 128) → Tanh
-               → Linear(128, 128) → Tanh
-               → Linear(128, 9) → Q-value for each action
+3 state inputs → Linear(3, 2) → Tanh
+               → Linear(2, 2) → Tanh
+               → Linear(2, 9) → Q-value for each action
 
 This contains two hidden layers and three linear layers in total. The output layer has no activation.
 
@@ -316,12 +316,12 @@ Gradient_norm records the norm reported by the clipping op before clipping
 Double DQN algorithm 
 The default QNetwork is: 
 ```text
-3 state inputs → Linear(3, 128) → Tanh
-               → Linear(128, 128) → Tanh
-               → Linear(128, 9) → Q-value for each action
+3 state inputs → Linear(3, 2) → Tanh
+               → Linear(2, 2) → Tanh
+               → Linear(2, 9) → Q-value for each action
 ```
 Where the final layer has no activation
-Note that this is subject to change as a 2 layer neural network could be more efficient and require less compute
+The default uses two hidden layers with 2 neurons each to keep computation minimal.
 
 Commands
 Full experiment

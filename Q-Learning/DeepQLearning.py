@@ -80,7 +80,7 @@ class DeepExperimentDefaults:
     divergence_threshold: float = np.inf
     state_bounds: Tuple[Tuple[float, float], ...] = qlearning.DEFAULT_STATE_BOUNDS
 
-    hidden_layers: Tuple[int, int] = (128, 128)
+    hidden_layers: Tuple[int, int] = (2, 2)
     activation: str = "tanh"
     network_learning_rate: float = 0.0003
     batch_size: int = 128
@@ -231,7 +231,7 @@ class StateNormalizer:
 
 class QNetwork(nn.Module):
     def __init__(
-        self, n_actions: int, hidden_layers: Tuple[int, int] = (128, 128),
+        self, n_actions: int, hidden_layers: Tuple[int, int] = DEEP_EXPERIMENT_DEFAULTS.hidden_layers,
         activation: str = "tanh",
     ):
         super().__init__()
@@ -889,6 +889,112 @@ def _save_figure(figure: plt.Figure, path: Path) -> None:
     plt.close(figure)
 
 
+def _rolling_finite_statistics(values: Sequence[float], window: int = 100) -> Tuple[np.ndarray, np.ndarray]:
+    """Trailing mean and population std; missing warm-up losses remain missing."""
+    array = np.asarray(values, dtype=float)
+    means = np.full(array.size, np.nan)
+    deviations = np.full(array.size, np.nan)
+    for end in range(1, array.size + 1):
+        recent = array[max(0, end - window):end]
+        finite = recent[np.isfinite(recent)]
+        if finite.size:
+            means[end - 1] = np.mean(finite)
+        if finite.size >= 2:
+            deviations[end - 1] = np.std(finite)
+    return means, deviations
+
+
+def plot_convergence_diagnostics(run: Mapping[str, Any], output: Path) -> List[Path]:
+    """Separate numerical stability from the greedy policy's measured performance."""
+    history = run["history"]
+    episodes = np.arange(1, len(history["episode_rewards"]) + 1)
+    lengths = np.asarray(history["episode_lengths"], dtype=float)
+    reward_rates = np.asarray(history["episode_rewards"], dtype=float) / lengths
+    reward_mean, reward_std = _rolling_finite_statistics(reward_rates)
+    loss_mean, _ = _rolling_finite_statistics(history["episode_mean_losses"])
+    saved: List[Path] = []
+
+    def finish(fig: plt.Figure, name: str) -> None:
+        path = output / name
+        _save_figure(fig, path)
+        saved.append(path)
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("Double DQN convergence diagnostics (100-episode rolling window)")
+    axes[0, 0].plot(episodes, reward_rates, alpha=0.25, label="Episode")
+    axes[0, 0].plot(episodes, reward_mean, label="Rolling mean")
+    axes[0, 0].set(ylabel="Reward per transition", title="Training reward rate (higher is better)")
+    axes[0, 0].legend()
+    axes[0, 1].plot(episodes, reward_std)
+    axes[0, 1].set(ylabel="Standard deviation", title="Reward-rate variability")
+    axes[1, 0].plot(episodes, history["episode_mean_losses"], alpha=0.3, label="Episode")
+    axes[1, 0].plot(episodes, loss_mean, label="Rolling mean")
+    axes[1, 0].set(ylabel="Mean Huber loss", title="Bellman training loss")
+    axes[1, 0].legend()
+    axes[1, 1].plot(episodes, history["episode_mean_q_values"], label="Mean Q")
+    axes[1, 1].plot(episodes, history["episode_max_q_values"], label="Mean batch max Q")
+    axes[1, 1].set(ylabel="Predicted Q-value", title="Q-value stability on replay batches")
+    axes[1, 1].legend()
+    for ax in axes.flat:
+        ax.set_xlabel("Episode")
+        ax.grid(alpha=0.25)
+    finish(fig, "training_convergence.png")
+
+    checkpoints = run["checkpoints"]
+    checkpoint_episodes = np.asarray(checkpoints["episodes"])
+    evaluations = checkpoints["evaluations"]
+    evaluation_rewards = [np.asarray(item["episode_rewards"], dtype=float) for item in evaluations]
+    means = np.asarray([np.mean(values) for values in evaluation_rewards])
+    deviations = np.asarray([np.std(values) for values in evaluation_rewards])
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+    axes[0].plot(checkpoint_episodes, means, marker="o", label="Greedy evaluation mean")
+    axes[0].fill_between(checkpoint_episodes, means - deviations, means + deviations,
+                         alpha=0.2, label="±1 std across evaluation trials")
+    axes[0].set(ylabel="Total reward", title="Policy performance without exploration (higher is better)")
+    axes[0].legend()
+    axes[1].plot(checkpoint_episodes, deviations, marker="o")
+    axes[1].set(xlabel="Training episode", ylabel="Reward standard deviation",
+                title="Variability across the same evaluation initial states")
+    for ax in axes:
+        ax.grid(alpha=0.25)
+    finish(fig, "evaluation_rewards.png")
+
+    records = checkpoints.get("network_checkpoints", [])
+    if records:
+        # Include biases: a stable weight matrix can hide a moving bias vector.
+        state = records[0]["online_network_state"]
+        layer_names = [name.rsplit(".", 1)[0] for name in state if name.endswith(".weight")]
+        fig, axes = plt.subplots(2, len(layer_names), figsize=(5 * len(layer_names), 7), squeeze=False)
+        fig.suptitle("Online network parameters at saved checkpoints")
+        record_episodes = [record["episode"] for record in records]
+        for column, name in enumerate(layer_names):
+            parameters = np.stack([
+                np.concatenate([
+                    record["online_network_state"][key].detach().cpu().numpy().ravel()
+                    for key in (f"{name}.weight", f"{name}.bias")
+                ]) for record in records
+            ])
+            label = f"Hidden layer {column + 1}" if column < len(layer_names) - 1 else "Output layer"
+            if parameters.shape[1] <= 64:
+                axes[0, column].plot(record_episodes, parameters, linewidth=0.8)
+            else:
+                mean, std = parameters.mean(axis=1), parameters.std(axis=1)
+                axes[0, column].plot(record_episodes, mean, label="Parameter mean")
+                axes[0, column].fill_between(record_episodes, mean - std, mean + std, alpha=0.2)
+            axes[0, column].set(title=label, ylabel="Weights and biases")
+            if len(records) >= 2:
+                changes = np.sqrt(np.mean(np.diff(parameters, axis=0) ** 2, axis=1))
+                axes[1, column].plot(record_episodes[1:], changes, marker="o")
+            else:
+                axes[1, column].text(0.5, 0.5, "Need at least two checkpoints", ha="center", transform=axes[1, column].transAxes)
+            axes[1, column].set(ylabel="RMS parameter change", title="Change since previous checkpoint")
+        for ax in axes.flat:
+            ax.set_xlabel("Episode")
+            ax.grid(alpha=0.25)
+        finish(fig, "layer_convergence.png")
+    return saved
+
+
 def plot_deep_q_learning(run: Mapping[str, Any], output_directory: Union[str, Path]) -> List[Path]:
     """Render the tabular baseline plots plus DQN-specific diagnostics."""
     output = Path(output_directory)
@@ -944,6 +1050,17 @@ def plot_deep_q_learning(run: Mapping[str, Any], output_directory: Union[str, Pa
 
     episodes = np.arange(1, len(history["episode_rewards"]) + 1)
     fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.plot(episodes, history["episode_rewards"], alpha=0.35, label="Episode reward")
+    ax.plot(
+        episodes, history["rolling_mean_rewards"], linewidth=2,
+        label="100-episode rolling average",
+    )
+    ax.set(xlabel="Episode", ylabel="Total reward", title="Double DQN: Reward vs. Episodes")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    finish(fig, "training_rewards.png")
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
     ax.plot(episodes, history["episode_mean_losses"], linewidth=1)
     losses = np.asarray(history["episode_mean_losses"], dtype=float)
     finite_losses = losses[np.isfinite(losses)]
@@ -987,9 +1104,10 @@ def plot_deep_q_learning(run: Mapping[str, Any], output_directory: Union[str, Pa
     axes[1, 1].set(xlabel="Episode", ylabel="Divergence rate (%)", title="Divergence")
     finish(fig, "evaluation_policy_metrics.png")
 
-    # These legacy standalone plots are now panels in training_diagnostics.png.
-    for obsolete in ("training_rewards.png", "epsilon_schedule.png"):
-        (output / obsolete).unlink(missing_ok=True)
+    saved.extend(plot_convergence_diagnostics(run, output))
+
+    # The epsilon schedule is included in training_diagnostics.png.
+    (output / "epsilon_schedule.png").unlink(missing_ok=True)
     return saved
 
 
@@ -1049,7 +1167,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             settings, episodes=3, eval_episodes=4, evaluation_interval=2,
             max_steps=12, eval_max_steps=12, minimum_replay_size=4,
             batch_size=4, replay_buffer_size=64, target_update_interval=3,
-            hidden_layers=(16, 16), print_every=1, training_plot_samples=3,
+            print_every=1, training_plot_samples=3,
             use_attractor_initial_state_ensemble=False,
         )
     output = make_run_directory(settings, args.output_directory)

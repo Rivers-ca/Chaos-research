@@ -1,0 +1,64 @@
+{
+  "episodes": 100,
+  "eval_episodes": 8,
+  "evaluation_interval": 10,
+  "max_steps": null,
+  "eval_max_steps": null,
+  "print_every": 10,
+  "training_plot_samples": 5,
+  "ic": [
+    0.0,
+    1.0,
+    1.05
+  ],
+  "training_ic_seed": 0,
+  "training_ic_perturbation": 0.01,
+  "exploration_seed": 0,
+  "evaluation_seed": 0,
+  "evaluation_ic_perturbation": 0.01,
+  "network_seed": 0,
+  "use_attractor_initial_state_ensemble": true,
+  "attractor_initial_states_per_lobe": 4,
+  "attractor_burn_in_steps": 2000,
+  "attractor_sample_spacing": 25,
+  "training_lyapunov_times": 5.0,
+  "evaluation_lyapunov_times": 5.0,
+  "action_low": -2.5,
+  "action_high": 2.5,
+  "u_ref": 2.5,
+  "action_bins": 9,
+  "discount_factor": 0.991,
+  "control_cost": 0.01,
+  "regularized": true,
+  "potential_shaping_weight": 0.005,
+  "divergence_threshold": "inf",
+  "state_bounds": [
+    [
+      -30.0,
+      30.0
+    ],
+    [
+      -30.0,
+      30.0
+    ],
+    [
+      0.0,
+      60.0
+    ]
+  ],
+  "hidden_layers": [
+    2,
+    2
+  ],
+  "activation": "tanh",
+  "network_learning_rate": 0.0003,
+  "batch_size": 128,
+  "replay_buffer_size": 60000,
+  "minimum_replay_size": 1000,
+  "target_update_interval": 1000,
+  "gradient_clip_norm": 10.0,
+  "epsilon_start": 1.0,
+  "epsilon_end": 0.02,
+  "epsilon_decay_steps": 40000,
+  "device_mode": "cpu"
+}

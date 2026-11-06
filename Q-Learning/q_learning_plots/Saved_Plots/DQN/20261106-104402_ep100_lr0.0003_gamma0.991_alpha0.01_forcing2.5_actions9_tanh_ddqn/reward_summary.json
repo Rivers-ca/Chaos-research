@@ -1,0 +1,15 @@
+{
+  "run_directory": "/Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261106-104402_ep100_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn",
+  "reward_plot": "/Users/riverscalareso/Desktop/Python/Q-Learning/q_learning_plots/Saved_Plots/DQN/20261106-104402_ep100_lr0.0003_gamma0.991_alpha0.01_forcing2.5_actions9_tanh_ddqn/training_rewards.png",
+  "hidden_layers": [
+    2,
+    2
+  ],
+  "episodes": 100,
+  "gradient_steps": 54201,
+  "first_10_mean_reward": -0.45958664258149573,
+  "last_10_mean_reward": -0.5563773091766442,
+  "first_evaluation_mean_reward": -0.5018655967483474,
+  "last_evaluation_mean_reward": -0.5031902440091562,
+  "plot_count": 23
+}
